@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { DeleteChartForm, DescriptionForm } from '@/components/chart-manage';
+import { ChartInfoForm, DeleteChartForm } from '@/components/chart-manage';
 import { Card, DifficultyBadge } from '@/components/ui';
 import { Uploader } from '@/components/uploader';
 import { getChart } from '@/lib/charts';
@@ -30,14 +30,20 @@ export default async function EditChart({ params }: { params: Promise<{ id: stri
       </div>
 
       <Card className="flex flex-col gap-3 p-6">
-        <h2 className="font-black">简介</h2>
-        <DescriptionForm chartId={id} description={chart.description} />
+        <h2 className="font-black">谱面信息</h2>
+        <ChartInfoForm
+          chartId={id}
+          description={chart.description}
+          tags={chart.tags}
+          allowDerivative={chart.allowDerivative}
+          parentChartId={chart.parentChartId}
+        />
       </Card>
 
       <Card className="flex flex-col gap-3 p-6">
         <h2 className="font-black">上传新版本</h2>
         <p className="text-xs text-muted">
-          曲名、难度、作者等信息改为新 ZIP 里 manifest.json 的内容；简介、喜欢、评论和下载次数保留。
+          曲名、难度、作者等信息改为新 ZIP 里 manifest.json 的内容；简介、标签、喜欢、评论、游玩和下载次数保留。
         </p>
         <Uploader chartId={id} maxMb={env().UPLOAD_MAX_MB} />
       </Card>

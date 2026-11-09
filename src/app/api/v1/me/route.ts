@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
-import { getViewer } from '@/lib/session';
+import { apiViewer } from '@/lib/game-auth';
+import { errorResponse } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  return NextResponse.json({ user: await getViewer() }, { headers: { 'Cache-Control': 'no-store' } });
+export async function GET(request: Request) {
+  try {
+    return NextResponse.json({ user: await apiViewer(request) }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (err) {
+    return errorResponse(err);
+  }
 }

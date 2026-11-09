@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   bigint,
   bigserial,
@@ -70,12 +71,20 @@ export const charts = pgTable(
     hasVideo: boolean().notNull().default(false),
     /** Bumped every time the package is replaced; storage keys include it. */
     revision: integer().notNull().default(1),
+    /** Free tags set by the uploader (スタンダード, ネタ譜面, ...). */
+    tags: text().array().notNull().default(sql`'{}'::text[]`),
+    /** 二次利用OK: others may base their charts on this one. */
+    allowDerivative: boolean().notNull().default(false),
+    /** 親譜面: the chart this one was derived from. */
+    parentChartId: bigint({ mode: 'number' }).references((): AnyPgColumn => charts.id, { onDelete: 'set null' }),
     packageKey: text().notNull(),
     packageSize: bigint({ mode: 'number' }).notNull(),
     packageSha256: text().notNull(),
     jacketKey: text(),
     audioKey: text().notNull(),
     downloadCount: integer().notNull().default(0),
+    /** Plays reported by the game (POST /api/v1/charts/<id>/plays), at most one per player per hour. */
+    playCount: integer().notNull().default(0),
     likeCount: integer().notNull().default(0),
     commentCount: integer().notNull().default(0),
     createdAt: now(),
@@ -87,6 +96,8 @@ export const charts = pgTable(
     index('charts_uploader_idx').on(t.uploaderId),
     check('charts_difficulty_check', sql`${t.difficulty} in ('easy','normal','hard','expert','master','append')`),
     check('charts_level_check', sql`${t.playLevel} between 0 and 99`),
+    check('charts_tags_check', sql`cardinality(${t.tags}) <= 8`),
+    index('charts_tags_idx').using('gin', t.tags),
   ],
 );
 
@@ -129,3 +140,32 @@ export const retiredObjects = pgTable('retired_objects', {
   key: text().primaryKey(),
   retiredAt: now(),
 });
+
+/** One row per counted play; ranking 'daily' counts the last 24 hours. `actor` is a user ID or a hashed address. */
+export const chartPlays = pgTable(
+  'chart_plays',
+  {
+    id: bigserial({ mode: 'number' }).primaryKey(),
+    chartId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => charts.id, { onDelete: 'cascade' }),
+    actor: text().notNull(),
+    createdAt: now(),
+  },
+  (t) => [index('chart_plays_chart_idx').on(t.chartId, t.createdAt), index('chart_plays_time_idx').on(t.createdAt)],
+);
+
+/** マイリスト: charts a user saved for later. */
+export const bookmarks = pgTable(
+  'bookmarks',
+  {
+    chartId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => charts.id, { onDelete: 'cascade' }),
+    userId: text()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: now(),
+  },
+  (t) => [primaryKey({ columns: [t.chartId, t.userId] }), index('bookmarks_user_idx').on(t.userId, t.createdAt)],
+);

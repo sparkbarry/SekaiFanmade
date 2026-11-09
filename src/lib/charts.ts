@@ -1,18 +1,20 @@
 import 'server-only';
-import { and, asc, count, desc, eq, gte, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { sha256File } from '@/lib/files';
-import { chartLikes, charts, comments, db, DIFFICULTIES, retiredObjects, users, type Difficulty } from '@/lib/db';
+import { sha256Hex } from '@/lib/crypto';
+import { bookmarks, chartLikes, chartPlays, charts, comments, db, DIFFICULTIES, retiredObjects, users, type Difficulty } from '@/lib/db';
 import { env } from '@/lib/env';
 import { PackageError, parsePackage, type ParsedPackage } from '@/lib/package';
 import { Forbidden, type Viewer } from '@/lib/session';
 import { storage } from '@/lib/storage';
 
 export const PAGE_SIZE = 24;
-export const SORTS = ['new', 'popular', 'downloads', 'updated'] as const;
+/** recommended: likes and plays weighted by age; daily: plays in the last 24 hours; plays: all-time plays; hard: highest level first. */
+export const SORTS = ['new', 'popular', 'downloads', 'updated', 'recommended', 'daily', 'plays', 'hard', 'random'] as const;
 export type Sort = (typeof SORTS)[number];
 
 export class NotFound extends Error {}
@@ -39,7 +41,11 @@ const chartColumns = {
   jacketKey: charts.jacketKey,
   audioKey: charts.audioKey,
   downloadCount: charts.downloadCount,
+  playCount: charts.playCount,
   likeCount: charts.likeCount,
+  tags: charts.tags,
+  allowDerivative: charts.allowDerivative,
+  parentChartId: charts.parentChartId,
   commentCount: charts.commentCount,
   createdAt: charts.createdAt,
   updatedAt: charts.updatedAt,
@@ -68,8 +74,17 @@ export interface ChartSummary {
   audioUrl: string;
   packageUrl: string;
   downloadCount: number;
+  playCount: number;
   likeCount: number;
   commentCount: number;
+  tags: string[];
+  /** 二次利用OK */
+  allowDerivative: boolean;
+  /** 親譜面, if this chart is derived from another one. */
+  parentChartId: number | null;
+  /** Only present when the request is signed in. */
+  liked?: boolean;
+  bookmarked?: boolean;
   createdAt: string;
   updatedAt: string;
   uploader: { id: string; nickname: string; avatarUrl: string | null };
@@ -99,8 +114,12 @@ function toSummary(r: ChartRow): ChartSummary {
     audioUrl: s.publicUrl(r.audioKey),
     packageUrl: s.publicUrl(r.packageKey),
     downloadCount: r.downloadCount,
+    playCount: r.playCount,
     likeCount: r.likeCount,
     commentCount: r.commentCount,
+    tags: r.tags,
+    allowDerivative: r.allowDerivative,
+    parentChartId: r.parentChartId,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     uploader: { id: r.uploaderId, nickname: r.uploaderName, avatarUrl: r.uploaderAvatar },
@@ -118,6 +137,13 @@ export interface ListQuery {
   page?: number;
   uploaderId?: string;
   likedBy?: string;
+  bookmarkedBy?: string;
+  /** Exact tag match. */
+  tag?: string;
+  /** Keeps 'random' stable across pages. */
+  seed?: string;
+  /** Adds liked / bookmarked flags for this user. */
+  viewerId?: string;
 }
 
 function escapeLike(s: string) {
@@ -147,16 +173,31 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
     where.push(eq(charts.difficulty, query.difficulty));
   }
   if (query.uploaderId) where.push(eq(charts.uploaderId, query.uploaderId));
+  const tag = query.tag?.trim().slice(0, 20);
+  if (tag) where.push(sql`${tag} = any(${charts.tags})`);
+  if (query.bookmarkedBy) {
+    where.push(
+      sql`exists (select 1 from ${bookmarks} where ${bookmarks.chartId} = ${charts.id} and ${bookmarks.userId} = ${query.bookmarkedBy})`,
+    );
+  }
   if (query.likedBy) {
     where.push(
       sql`exists (select 1 from ${chartLikes} where ${chartLikes.chartId} = ${charts.id} and ${chartLikes.userId} = ${query.likedBy})`,
     );
   }
+  const dailyPlays = sql`(select count(*) from ${chartPlays} where ${chartPlays.chartId} = ${charts.id} and ${chartPlays.createdAt} > now() - interval '1 day')`;
+  const hot = sql`((${charts.likeCount} * 4 + ${charts.playCount} + ${charts.downloadCount} + 2) / power(extract(epoch from now() - ${charts.createdAt}) / 3600 + 2, 1.2))`;
+  const seed = (query.seed ?? '').replace(/[^0-9a-z]/gi, '').slice(0, 16) || 'seed';
   const order = {
     new: [desc(charts.createdAt), desc(charts.id)],
     updated: [desc(charts.updatedAt), desc(charts.id)],
-    popular: [desc(charts.likeCount), desc(charts.downloadCount), desc(charts.id)],
+    popular: [desc(charts.likeCount), desc(charts.playCount), desc(charts.id)],
     downloads: [desc(charts.downloadCount), desc(charts.likeCount), desc(charts.id)],
+    recommended: [desc(hot), desc(charts.id)],
+    daily: [desc(dailyPlays), desc(charts.playCount), desc(charts.likeCount), desc(charts.id)],
+    plays: [desc(charts.playCount), desc(charts.likeCount), desc(charts.id)],
+    hard: [desc(charts.playLevel), desc(charts.likeCount), desc(charts.id)],
+    random: [sql`md5(${charts.id}::text || ${seed})`],
   }[query.sort ?? 'new'];
 
   const page = Math.max(1, Math.trunc(query.page ?? 1));
@@ -169,13 +210,39 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
       .offset((page - 1) * PAGE_SIZE),
     db().select({ total: count() }).from(charts).innerJoin(users, eq(users.id, charts.uploaderId)).where(filter),
   ]);
-  return { items: rows.map(toSummary), total, page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)) };
+  const items = rows.map(toSummary);
+  if (query.viewerId) await addViewerFlags(items, query.viewerId);
+  return { items, total, page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)) };
 }
 
-export async function getChart(id: number): Promise<ChartSummary | null> {
+async function addViewerFlags(items: ChartSummary[], viewerId: string) {
+  if (items.length === 0) return;
+  const ids = items.map((c) => c.id);
+  const [liked, saved] = await Promise.all([
+    db()
+      .select({ id: chartLikes.chartId })
+      .from(chartLikes)
+      .where(and(eq(chartLikes.userId, viewerId), inArray(chartLikes.chartId, ids))),
+    db()
+      .select({ id: bookmarks.chartId })
+      .from(bookmarks)
+      .where(and(eq(bookmarks.userId, viewerId), inArray(bookmarks.chartId, ids))),
+  ]);
+  const likedSet = new Set(liked.map((r) => r.id));
+  const savedSet = new Set(saved.map((r) => r.id));
+  for (const c of items) {
+    c.liked = likedSet.has(c.id);
+    c.bookmarked = savedSet.has(c.id);
+  }
+}
+
+export async function getChart(id: number, viewerId?: string): Promise<ChartSummary | null> {
   if (!Number.isSafeInteger(id) || id <= 0) return null;
   const [row] = await selectCharts().where(and(eq(charts.id, id), isNull(charts.deletedAt)));
-  return row ? toSummary(row) : null;
+  if (!row) return null;
+  const chart = toSummary(row);
+  if (viewerId) await addViewerFlags([chart], viewerId);
+  return chart;
 }
 
 export async function hasLiked(chartId: number, userId: string): Promise<boolean> {
@@ -361,11 +428,40 @@ export async function replaceChart(viewer: Viewer, chartId: number, zipPath: str
   });
 }
 
-export async function updateDescription(viewer: Viewer, chartId: number, description: string): Promise<void> {
+export interface ChartInfoUpdate {
+  description: string;
+  tags: string[];
+  allowDerivative: boolean;
+  parentChartId: number | null;
+}
+
+export function normalizeTags(input: string[]): string[] {
+  const out: string[] = [];
+  for (const raw of input) {
+    const tag = raw.replace(/[\s,#]+/g, ' ').trim().slice(0, 20);
+    if (tag && !out.includes(tag)) out.push(tag);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+export async function updateChartInfo(viewer: Viewer, chartId: number, info: ChartInfoUpdate): Promise<void> {
   await ownedChart(viewer, chartId);
+  let parent: number | null = null;
+  if (info.parentChartId !== null) {
+    if (info.parentChartId === chartId) throw new PackageError('親譜面不能是这份谱面自己。');
+    const found = await getChart(info.parentChartId);
+    if (!found) throw new PackageError(`找不到编号为 ${info.parentChartId} 的谱面。`);
+    parent = found.id;
+  }
   await db()
     .update(charts)
-    .set({ description: description.slice(0, 2000) })
+    .set({
+      description: info.description.slice(0, 2000),
+      tags: normalizeTags(info.tags),
+      allowDerivative: info.allowDerivative,
+      parentChartId: parent,
+    })
     .where(eq(charts.id, chartId));
 }
 
@@ -398,6 +494,55 @@ export async function setLike(viewer: Viewer, chartId: number, liked: boolean): 
     await tx.update(charts).set({ likeCount: n }).where(eq(charts.id, chartId));
     return n;
   });
+}
+
+/** Counts a play reported by the game: one per actor per chart per hour. Returns the new total. */
+export async function recordPlay(chartId: number, actor: string): Promise<number | null> {
+  return db().transaction(async (tx) => {
+    const [chart] = await tx
+      .select({ id: charts.id, playCount: charts.playCount })
+      .from(charts)
+      .where(and(eq(charts.id, chartId), isNull(charts.deletedAt)))
+      .for('update');
+    if (!chart) return null;
+    const since = new Date(Date.now() - 3600_000);
+    const [recent] = await tx
+      .select({ one: sql`1` })
+      .from(chartPlays)
+      .where(and(eq(chartPlays.chartId, chartId), eq(chartPlays.actor, actor), gte(chartPlays.createdAt, since)))
+      .limit(1);
+    if (recent) return chart.playCount;
+    await tx.insert(chartPlays).values({ chartId, actor });
+    const [updated] = await tx
+      .update(charts)
+      .set({ playCount: sql`${charts.playCount} + 1` })
+      .where(eq(charts.id, chartId))
+      .returning({ playCount: charts.playCount });
+    return updated.playCount;
+  });
+}
+
+export function anonymousActor(address: string): string {
+  // Hashed with the day so addresses are not kept.
+  const day = new Date().toISOString().slice(0, 10);
+  return `addr:${sha256Hex(`${day}|${address}`).slice(0, 32)}`;
+}
+
+export async function setBookmark(viewer: Viewer, chartId: number, saved: boolean): Promise<void> {
+  const chart = await getChart(chartId);
+  if (!chart) throw new NotFound('谱面不存在。');
+  if (saved) {
+    await db().insert(bookmarks).values({ chartId, userId: viewer.id }).onConflictDoNothing();
+  } else {
+    await db().delete(bookmarks).where(and(eq(bookmarks.chartId, chartId), eq(bookmarks.userId, viewer.id)));
+  }
+}
+
+export async function listTags(limit = 30): Promise<{ tag: string; count: number }[]> {
+  const rows = await db().execute<{ tag: string; count: string }>(
+    sql`select t as tag, count(*) as count from ${charts}, unnest(${charts.tags}) t where ${charts.deletedAt} is null group by t order by count(*) desc, t limit ${limit}`,
+  );
+  return rows.map((r) => ({ tag: r.tag, count: Number(r.count) }));
 }
 
 export async function recordDownload(chartId: number): Promise<string | null> {

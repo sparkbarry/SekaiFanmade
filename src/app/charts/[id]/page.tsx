@@ -50,10 +50,36 @@ export default async function ChartPage({ params }: { params: Params }) {
               {chart.hasVideo && (
                 <span className="rounded-full border-[1.5px] border-outline bg-cream px-2.5 py-0.5 text-xs font-bold">含 MV</span>
               )}
+              {chart.allowDerivative && (
+                <span className="rounded-full border-[1.5px] border-outline bg-[#ffd1e3] px-2.5 py-0.5 text-xs font-bold text-[#382d2a]">
+                  二次利用OK
+                </span>
+              )}
+              {chart.parentChartId && (
+                <Link
+                  href={`/charts/${chart.parentChartId}`}
+                  className="rounded-full border-[1.5px] border-outline bg-[#c9f3e6] px-2.5 py-0.5 text-xs font-bold text-[#382d2a] hover:underline"
+                >
+                  親譜面 #{chart.parentChartId}
+                </Link>
+              )}
               <span className="text-xs text-muted">#{chart.id}</span>
             </div>
             <h1 className="break-words text-2xl font-black leading-tight sm:text-3xl">{chart.scoreTitle}</h1>
             {chart.scoreTitle !== chart.title && <p className="text-lg font-bold">{chart.title}</p>}
+            {chart.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {chart.tags.map((t) => (
+                  <Link
+                    key={t}
+                    href={`/?tag=${encodeURIComponent(t)}`}
+                    className="rounded-[8px] border-[1.5px] border-border bg-cream px-2 py-0.5 text-xs font-bold hover:border-outline"
+                  >
+                    {t}
+                  </Link>
+                ))}
+              </div>
+            )}
             {credits.length > 0 && (
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
                 {credits.map(([k, v]) => (
@@ -70,7 +96,7 @@ export default async function ChartPage({ params }: { params: Params }) {
             </Link>
             <p className="text-xs text-muted">
               {formatDate(chart.createdAt)} 上传
-              {chart.revision > 1 && ` · ${formatDate(chart.updatedAt)} 更新（第 ${chart.revision} 版）`} · {formatBytes(chart.packageSize)} · 下载{' '}
+              {chart.revision > 1 && ` · ${formatDate(chart.updatedAt)} 更新（第 ${chart.revision} 版）`} · {formatBytes(chart.packageSize)} · 游玩 {chart.playCount} 次 · 下载{' '}
               {chart.downloadCount} 次
             </p>
             <div className="mt-2 flex flex-wrap gap-2">

@@ -1,24 +1,22 @@
 import { NextResponse } from 'next/server';
-import { listCharts, SORTS, type Sort } from '@/lib/charts';
-import { DIFFICULTIES, type Difficulty } from '@/lib/db/schema';
+import { listCharts } from '@/lib/charts';
+import { cacheHeaders, listQueryFrom } from '@/lib/api';
+import { apiViewer } from '@/lib/game-auth';
 import { errorResponse } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 
-/** Public catalogue for OpenSekai and other clients. Query: q, difficulty, sort, page, uploader. */
+/**
+ * Public catalogue. Query: q (title, artists, uploader or #id), tag, difficulty,
+ * sort (new|updated|recommended|daily|plays|popular|downloads|hard|random), seed (for random), page, uploader.
+ * With a game Bearer token or a website session each item also has liked / bookmarked.
+ */
 export async function GET(request: Request) {
   try {
     const p = new URL(request.url).searchParams;
-    const difficulty = p.get('difficulty');
-    const sort = p.get('sort');
-    const result = await listCharts({
-      q: p.get('q') ?? undefined,
-      difficulty: (DIFFICULTIES as readonly string[]).includes(difficulty ?? '') ? (difficulty as Difficulty) : undefined,
-      sort: (SORTS as readonly string[]).includes(sort ?? '') ? (sort as Sort) : 'new',
-      page: Number(p.get('page') ?? '1') || 1,
-      uploaderId: p.get('uploader') ?? undefined,
-    });
-    return NextResponse.json(result, { headers: { 'Cache-Control': 'public, max-age=15' } });
+    const viewer = await apiViewer(request);
+    const result = await listCharts({ ...listQueryFrom(p), uploaderId: p.get('uploader') ?? undefined, viewerId: viewer?.id });
+    return NextResponse.json(result, { headers: cacheHeaders(!!viewer) });
   } catch (err) {
     return errorResponse(err);
   }

@@ -8,6 +8,13 @@
       "when": 1794195487685,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794197464572,
+      "tag": "0001_game_browser",
+      "breakpoints": true
     }
   ]
 }

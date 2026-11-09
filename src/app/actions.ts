@@ -2,8 +2,9 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { addComment, deleteChart, deleteComment, setLike, updateDescription } from '@/lib/charts';
+import { addComment, deleteChart, deleteComment, setLike, updateChartInfo } from '@/lib/charts';
 import { errorStatus } from '@/lib/http';
+import { PackageError } from '@/lib/package';
 import { requireViewer } from '@/lib/session';
 
 export interface ActionState {
@@ -54,11 +55,19 @@ export async function deleteCommentAction(commentId: number): Promise<ActionStat
   });
 }
 
-export async function saveDescriptionAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+export async function saveChartInfoAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   return run(async () => {
     const viewer = await requireViewer();
     const id = chartId(form);
-    await updateDescription(viewer, id, String(form.get('description') ?? ''));
+    const parentRaw = String(form.get('parentChartId') ?? '').replace('#', '').trim();
+    const parent = parentRaw ? Number(parentRaw) : null;
+    if (parent !== null && (!Number.isSafeInteger(parent) || parent <= 0)) throw new PackageError('親譜面要填谱面编号。');
+    await updateChartInfo(viewer, id, {
+      description: String(form.get('description') ?? ''),
+      tags: String(form.get('tags') ?? '').split(/[,，、\n]/),
+      allowDerivative: form.get('allowDerivative') === 'on',
+      parentChartId: parent,
+    });
     revalidatePath(`/charts/${id}`);
   });
 }

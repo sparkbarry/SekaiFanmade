@@ -38,7 +38,7 @@ export function ChartCard({ chart }: { chart: ChartSummary }) {
           <Avatar src={chart.uploader.avatarUrl} name={chart.uploader.nickname} size={20} />
           <span className="min-w-0 flex-1 truncate">{chart.uploader.nickname}</span>
           <span title="喜欢" className="tabular-nums">♥ {chart.likeCount}</span>
-          <span title="下载" className="tabular-nums">↓ {chart.downloadCount}</span>
+          <span title="游玩" className="tabular-nums">▶ {chart.playCount}</span>
         </div>
       </div>
     </Link>

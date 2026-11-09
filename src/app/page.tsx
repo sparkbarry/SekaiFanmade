@@ -7,7 +7,8 @@ import { DIFFICULTIES, type Difficulty } from '@/lib/db/schema';
 
 export const dynamic = 'force-dynamic';
 
-const SORT_LABEL: Record<Sort, string> = { new: '最新', updated: '最近更新', popular: '最受欢迎', downloads: '下载最多' };
+const SORT_LABEL: Partial<Record<Sort, string>> = { new: '最新', recommended: '推荐', daily: '今日热门', popular: '最受欢迎', plays: '游玩最多' };
+const SHOWN_SORTS = ['new', 'recommended', 'daily', 'popular', 'plays'] as const;
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
@@ -23,11 +24,13 @@ export default async function Home({ searchParams }: { searchParams: Search }) {
   const s = one(sp.sort);
   const sort: Sort = (SORTS as readonly string[]).includes(s ?? '') ? (s as Sort) : 'new';
   const page = Math.max(1, Number(one(sp.page)) || 1);
-  const result = await listCharts({ q, difficulty, sort, page });
+  const tag = one(sp.tag)?.trim() || undefined;
+  const result = await listCharts({ q, difficulty, sort, page, tag });
 
   const href = (over: { d?: string | null; sort?: string; page?: number }) => {
     const p = new URLSearchParams();
     if (q) p.set('q', q);
+    if (tag) p.set('tag', tag);
     const dd = over.d === undefined ? difficulty : over.d;
     if (dd) p.set('d', dd);
     const ss = over.sort ?? sort;
@@ -88,7 +91,7 @@ export default async function Home({ searchParams }: { searchParams: Search }) {
           </Link>
         ))}
         <div className="ml-auto flex gap-1">
-          {SORTS.map((key) => (
+          {SHOWN_SORTS.map((key) => (
             <Link
               key={key}
               href={href({ sort: key, page: 1 })}
@@ -104,10 +107,12 @@ export default async function Home({ searchParams }: { searchParams: Search }) {
       </div>
 
       {result.items.length === 0 ? (
-        <EmptyState>{q || difficulty ? '没有找到符合条件的谱面' : '还没有人上传谱面'}</EmptyState>
+        <EmptyState>{q || difficulty || tag ? '没有找到符合条件的谱面' : '还没有人上传谱面'}</EmptyState>
       ) : (
         <>
-          <p className="text-sm text-muted">共 {result.total} 份谱面</p>
+          <p className="text-sm text-muted">
+            {tag && <>标签「{tag}」· </>}共 {result.total} 份谱面
+          </p>
           <ChartGrid charts={result.items} />
         </>
       )}
