@@ -12,13 +12,20 @@ import { storage } from '@/lib/storage';
 
 /**
  * Charts uploaded before the parts were stored separately (migration 0005) still point at a ZIP. This
- * reads each ZIP, stores its parts by hash (the audio and 512px cover are the same bytes as before, so they
- * reuse their objects), points the chart at them and releases the ZIP, which deletes its object. Runs at
- * start-up; safe to run again.
+ * reads each ZIP, stores its parts by hash, points the chart at them and releases the ZIP (and the old
+ * audio and thumbnail, which the new parts usually reuse; the thumbnail is re-encoded and may differ).
+ * Runs at start-up; safe to run again.
  */
 export async function splitPackages(): Promise<{ split: number; failed: number }> {
   const rows = await db()
-    .select({ id: charts.id, numberId: charts.numberId, packageFileId: charts.packageFileId, storageKey: files.storageKey })
+    .select({
+      id: charts.id,
+      numberId: charts.numberId,
+      packageFileId: charts.packageFileId,
+      audioFileId: charts.audioFileId,
+      jacketFileId: charts.jacketFileId,
+      storageKey: files.storageKey,
+    })
     .from(charts)
     .innerJoin(files, eq(files.id, charts.packageFileId))
     .where(and(isNotNull(charts.packageFileId), isNull(charts.deletedAt)));
@@ -42,7 +49,8 @@ export async function splitPackages(): Promise<{ split: number; failed: number }
         return updated.length > 0;
       });
       if (done) {
-        await releaseFiles([row.packageFileId]);
+        // The ZIP, and the old audio or thumbnail if the stored parts came out as different bytes.
+        await releaseFiles([row.packageFileId, row.audioFileId, row.jacketFileId]);
         split++;
         console.log(`split chart ${row.numberId} (${row.id}) into its parts; released ${row.storageKey}`);
       }

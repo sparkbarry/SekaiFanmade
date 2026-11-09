@@ -1,5 +1,5 @@
 import 'server-only';
-import { retryRetiredObjects } from '@/lib/file-store';
+import { releaseOrphanFiles, retryRetiredObjects } from '@/lib/file-store';
 import { splitPackages } from '@/lib/package-split';
 
 const RETRY_INTERVAL_MS = 10 * 60_000;
@@ -16,6 +16,12 @@ export function startBackgroundJobs() {
       if (n) console.log(`deleted ${n} retired object(s)`);
     } catch (err) {
       console.error('retired object retry failed', err);
+    }
+    try {
+      const n = await releaseOrphanFiles();
+      if (n) console.log(`released ${n} file(s) no chart refers to`);
+    } catch (err) {
+      console.error('orphan file release failed', err);
     }
   };
   setTimeout(async () => {

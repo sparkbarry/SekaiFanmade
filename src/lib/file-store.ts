@@ -91,6 +91,25 @@ export async function releaseFiles(fileIds: (number | null | undefined)[]): Prom
   }
 }
 
+/**
+ * Releases files that no chart refers to and that are older than an hour (a file is inserted in the same
+ * transaction as the chart row that uses it, so a younger one may belong to an upload in progress). Catches
+ * files left behind by a bug or a crash between a commit and its releaseFiles.
+ */
+export async function releaseOrphanFiles(): Promise<number> {
+  const rows = await db().execute<{ id: string }>(sql`
+    select f.id from ${files} f
+    where f.created_at < now() - interval '1 hour'
+      and not exists (
+        select 1 from ${charts} c
+        where f.id in (c.package_file_id, c.score_file_id, c.audio_file_id, c.jacket_file_id, c.jacket_source_file_id, c.video_file_id)
+      )
+    limit 100`);
+  const ids = rows.map((r) => Number(r.id));
+  await releaseFiles(ids);
+  return ids.length;
+}
+
 /** After a rolled-back transaction: deletes objects it uploaded that ended up with no files row. */
 export async function discardUnreferenced(keys: string[]): Promise<void> {
   for (const key of keys) {
