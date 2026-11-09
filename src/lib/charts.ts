@@ -663,3 +663,65 @@ export async function getUser(id: string) {
     .where(eq(users.id, id));
   return row ?? null;
 }
+
+/* ---------- co-op live (src/lib/multiplay) ---------- */
+
+/** What a co-op room needs to know about a chart. Charts with the same audio are one song. */
+export interface PlayableChart {
+  id: string;
+  numberId: number;
+  title: string;
+  difficulty: Difficulty;
+  playLevel: number;
+  jacketUrl: string | null;
+  audioSha256: string;
+  composer: string;
+  uploader: string;
+}
+
+function toPlayable(r: ChartRow): PlayableChart | null {
+  if (!r.audioSha256 || !r.manifest) return null;
+  return {
+    id: r.id,
+    numberId: r.numberId,
+    title: r.title,
+    difficulty: r.difficulty,
+    playLevel: r.playLevel,
+    jacketUrl: r.jacketStorageKey ? storage().publicUrl(r.jacketStorageKey) : null,
+    audioSha256: r.audioSha256,
+    composer: r.composer,
+    uploader: r.uploaderName,
+  };
+}
+
+/** A live chart by id or number. */
+export async function getPlayableChart(ref: string): Promise<PlayableChart | null> {
+  const parsed = parseChartRef(ref);
+  if (!parsed) return null;
+  const [row] = await selectCharts().where(and(refCondition(parsed), isNull(charts.deletedAt)));
+  return row ? toPlayable(row) : null;
+}
+
+/** おまかせ: any live chart. */
+export async function randomPlayableChart(): Promise<PlayableChart | null> {
+  const [row] = await selectCharts()
+    .where(and(isNull(charts.deletedAt), sql`${charts.audioFileId} is not null`))
+    .orderBy(sql`random()`)
+    .limit(1);
+  return row ? toPlayable(row) : null;
+}
+
+/** The charts of one song (the same audio bytes), easiest first. */
+export async function playableChartsOfSong(audioSha256: string, limit = 24): Promise<PlayableChart[]> {
+  if (!/^[0-9a-f]{64}$/.test(audioSha256)) return [];
+  const rows = await selectCharts()
+    .where(and(isNull(charts.deletedAt), eq(audioFile.sha256, audioSha256)))
+    .orderBy(
+      sql`array_position(array['easy','normal','hard','expert','master','append']::text[], ${charts.difficulty})`,
+      charts.playLevel,
+      desc(sql`${charts.upvotes} - ${charts.downvotes}`),
+      charts.createdAt,
+    )
+    .limit(limit);
+  return rows.map(toPlayable).filter((c): c is PlayableChart => c !== null);
+}

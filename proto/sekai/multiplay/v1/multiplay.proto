@@ -1,0 +1,311 @@
+// Co-op live (協力ライブ) for OpenSekai, served by SekaiFanmade.
+//
+// One bidirectional stream per player. The first ClientMessage must be `join`; the server answers
+// with `welcome` and then a `room` snapshot every time anything in the room changes. The stream
+// ends when the player leaves or the room closes.
+//
+// Authentication: gRPC metadata `authorization: Bearer <game session>`, the same 64-hex game
+// session the game sends to /api/v1/* (OurTaiko SSO introspect).
+//
+// Flow of one round (times are the server's defaults):
+//   LOBBY        members gather (max 5). The host locks the members (メンバー決定) once there
+//                are 2 or more; a public room locks by itself 30 s after it has 2 members, or
+//                at once when it is full.
+//   SONG_SELECT  20 s. Each player picks a chart or おまかせ.
+//   SONG_DRAW    3 s. The song is drawn at random from the picks (おまかせ = any chart on the site).
+//   DIFFICULTY   10 s. Each player picks one of the charts that share the drawn song's audio,
+//                then 準備完了. Unpicked players keep their own pick if it is that song, else
+//                the drawn chart.
+//   LOADING      up to 90 s. Each player downloads its chart and loads the live, then `loaded`.
+//                Players not loaded in time are dropped from the round.
+//   PLAYING      `start_live` is sent once every player is loaded. Players stream `status`;
+//                the server sends everyone's statuses 4 times a second. FEVER CHANCE: see
+//                FeverReport.
+//   RESULT       once every player has finished (or 30 s after the first one did). The result
+//                stays in the room snapshot; the room goes back to LOBBY with the same members.
+syntax = "proto3";
+
+package sekai.multiplay.v1;
+
+option csharp_namespace = "Sekai.CoopLive.Proto";
+
+service MultiLive {
+  rpc Connect(stream ClientMessage) returns (stream ServerMessage);
+}
+
+/* ---------------- client → server ---------------- */
+
+message ClientMessage {
+  oneof kind {
+    Join join = 1;
+    Leave leave = 2;
+    LockMembers lock_members = 3;
+    OpenRoom open_room = 4;
+    PickSong pick_song = 5;
+    PickDifficulty pick_difficulty = 6;
+    SetReady set_ready = 7;
+    Loaded loaded = 8;
+    PlayerStatus status = 9;
+    FeverReport fever_report = 10;
+    FinishLive finish = 11;
+    SendStamp stamp = 12;
+    Ping ping = 13;
+    Kick kick = 14;
+  }
+}
+
+message Join {
+  oneof target {
+    // フリールーム: join a public room that is waiting, or open a new one.
+    QuickMatch quick_match = 1;
+    // プライベートルーム: a new room that only its 5-digit ID can join.
+    CreatePrivate create_private = 2;
+    // Join a room by its 5-digit ID. Also how a dropped player comes back to its room.
+    string room_code = 3;
+  }
+  // Protocol version the client speaks (currently 1).
+  int32 protocol = 4;
+}
+
+message QuickMatch {}
+message CreatePrivate {}
+message Leave {}
+// Host only, LOBBY only: メンバー決定.
+message LockMembers {}
+// Host only: turns a private room into a public one (ルーム解放). Cannot be undone.
+message OpenRoom {}
+// Host only, LOBBY only.
+message Kick {
+  string user_id = 1;
+}
+
+message PickSong {
+  // A chart id (32 hex) or number; empty means おまかせ.
+  string chart = 1;
+}
+
+message PickDifficulty {
+  // One of the room's `difficulty_options`.
+  string chart_id = 1;
+}
+
+// 準備完了 in DIFFICULTY.
+message SetReady {
+  bool ready = 1;
+}
+
+message Loaded {
+  // False when the chart could not be downloaded or loaded; the player leaves the round.
+  bool ok = 1;
+  string error = 2;
+}
+
+// What a player shows the others during the live. Send it when it changes, at most ~5 times a second.
+message PlayerStatus {
+  int32 score = 1;
+  int32 combo = 2;
+  int32 max_combo = 3;
+  int32 life = 4;
+  int32 perfect = 5;
+  int32 great = 6;
+  int32 good = 7;
+  int32 bad = 8;
+  int32 miss = 9;
+  // Music time of the player's live, in milliseconds.
+  int32 music_time_ms = 10;
+}
+
+// FEVER CHANCE. Every player's FEVER CHANCE is the same span of music time, worked out by the client
+// from the song length: start = 45 % of the song, length = min(20 s, 15 % of the song). FEVER starts
+// 3 s after FEVER CHANCE ends and lasts as long. At the end of FEVER CHANCE each player reports what
+// it hit in it; the server decides and sends `fever`:
+//   SUPER_FEVER  2 or more players took part and none of them got a GOOD, BAD or MISS in it.
+//   FEVER        the players' PERFECT + GREAT are at least 70 % of their judged notes.
+//   NONE         otherwise.
+// Notes judged during FEVER score 1.5 times.
+message FeverReport {
+  int32 judged = 1;
+  int32 perfect_or_great = 2;
+  // No GOOD, BAD or MISS in FEVER CHANCE.
+  bool combo_kept = 3;
+}
+
+message FinishLive {
+  PlayerStatus final = 1;
+  // Life reached 0 at some point (the player still plays to the end).
+  bool failed = 2;
+}
+
+message SendStamp {
+  int32 stamp_id = 1;
+}
+
+message Ping {
+  int64 client_time_ms = 1;
+}
+
+/* ---------------- server → client ---------------- */
+
+message ServerMessage {
+  oneof kind {
+    Welcome welcome = 1;
+    Room room = 2;
+    StartLive start_live = 3;
+    LiveStatuses statuses = 4;
+    FeverResult fever = 5;
+    StampSent stamp = 6;
+    Pong pong = 7;
+    Notice notice = 8;
+    Closed closed = 9;
+  }
+}
+
+message Welcome {
+  string user_id = 1;
+  string nickname = 2;
+  int32 protocol = 3;
+}
+
+enum Phase {
+  PHASE_UNSPECIFIED = 0;
+  LOBBY = 1;
+  SONG_SELECT = 2;
+  SONG_DRAW = 3;
+  DIFFICULTY = 4;
+  LOADING = 5;
+  PLAYING = 6;
+  RESULT = 7;
+}
+
+message Room {
+  string code = 1;
+  bool public = 2;
+  Phase phase = 3;
+  // The phase's deadline and the server's clock when this snapshot was made, both Unix ms; the
+  // countdown is deadline_ms - server_time_ms (0 when the phase has no deadline).
+  int64 deadline_ms = 4;
+  int64 server_time_ms = 5;
+  string host_id = 6;
+  repeated Member members = 7;
+  int32 max_members = 8;
+  // Counts rounds, so a client can tell a new round from the last one.
+  int32 round = 9;
+  // From SONG_DRAW on: the drawn song and who picked it (empty: おまかせ).
+  ChartInfo song = 10;
+  string song_picked_by = 11;
+  // The charts that share the drawn song's audio, easiest first.
+  repeated ChartInfo difficulty_options = 12;
+  // The last round's result, while the room is in RESULT or back in LOBBY after it.
+  LiveResult result = 13;
+}
+
+message Member {
+  string user_id = 1;
+  string nickname = 2;
+  string avatar_url = 3;
+  // Joined order; also the slot shown in the live.
+  int32 slot = 4;
+  bool connected = 5;
+  // SONG_SELECT: has picked (what was picked stays hidden until the draw).
+  bool picked = 6;
+  // From the draw on: what the player picked (empty: おまかせ).
+  string picked_chart_id = 7;
+  // DIFFICULTY on: the chart this player plays.
+  string chart_id = 8;
+  bool ready = 9;
+  bool loaded = 10;
+  // In the current round (false for a player dropped while loading).
+  bool playing = 11;
+  bool finished = 12;
+}
+
+message ChartInfo {
+  string id = 1;
+  int32 number_id = 2;
+  string title = 3;
+  string difficulty = 4;
+  int32 play_level = 5;
+  string jacket_url = 6;
+  string audio_sha256 = 7;
+  string composer = 8;
+  string uploader = 9;
+}
+
+message StartLive {
+  int32 round = 1;
+}
+
+message MemberStatus {
+  string user_id = 1;
+  PlayerStatus status = 2;
+  bool connected = 3;
+  bool finished = 4;
+}
+
+message LiveStatuses {
+  repeated MemberStatus members = 1;
+}
+
+enum FeverKind {
+  FEVER_KIND_UNSPECIFIED = 0;
+  NO_FEVER = 1;
+  FEVER = 2;
+  SUPER_FEVER = 3;
+}
+
+message FeverResult {
+  FeverKind kind = 1;
+}
+
+enum Award {
+  AWARD_UNSPECIFIED = 0;
+  NO_AWARD = 1;
+  // The top score.
+  MVP = 2;
+  // The top score, at least 30 % ahead of the second.
+  SUPER_STAR = 3;
+}
+
+message PlayerResult {
+  string user_id = 1;
+  string nickname = 2;
+  string chart_id = 3;
+  PlayerStatus status = 4;
+  // 1-based, by score.
+  int32 rank = 5;
+  Award award = 6;
+  bool failed = 7;
+  // Left or lost connection before finishing; its last status is shown.
+  bool disconnected = 8;
+  bool full_combo = 9;
+  bool all_perfect = 10;
+}
+
+message LiveResult {
+  int32 round = 1;
+  int64 team_score = 2;
+  FeverKind fever = 3;
+  repeated PlayerResult players = 4;
+}
+
+message StampSent {
+  string user_id = 1;
+  int32 stamp_id = 2;
+}
+
+message Pong {
+  int64 client_time_ms = 1;
+  int64 server_time_ms = 2;
+}
+
+// Something the player should be told, e.g. a refused action. The stream stays open.
+message Notice {
+  string code = 1;
+  string message = 2;
+}
+
+// The server ends the stream after this.
+message Closed {
+  string code = 1;
+  string message = 2;
+}

@@ -32,6 +32,7 @@ OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上�
 | `src/lib/db/schema.ts`、`drizzle/` | 表结构与迁移（容器启动时自动执行） |
 | `src/app/` | 页面、server actions、`/api/v1/*`、`/auth/*` |
 | `src/app/globals.css`、`src/components/` | 界面：仿 Moesekai 的 Material 3 风格（浅灰底、青绿强调色、浮动侧栏、白卡片），颜色都是 `globals.css` 里的变量，跟随系统深浅色；侧栏 `side-nav.tsx`，顶栏 `page-bar.tsx`，基础组件 `ui.tsx`。设计稿在 Claude Design 画布「Sekai Fanmade redesign」 |
+| `proto/sekai/multiplay/v1/`、`src/lib/multiplay/` | 協力ライブ的 gRPC 协议、房间状态机、服务（有单元测试和 gRPC 集成测试）；`proto/` 改了以后 `pnpm proto:generate` 重新生成 TS 类型 |
 | `deploy/` | 生产 Compose、OpenResty 片段、发布脚本、环境变量示例 |
 
 ## 登录
@@ -77,6 +78,19 @@ OIDC 授权码 + S256 PKCE，confidential client（HTTP Basic），scope `openid
 | `GET /charts/<id 或 numberId>/download` | 旧链接，302 到谱面页 |
 | `GET /readyz` | 健康检查 |
 
+## 協力ライブ（gRPC 联机）
+
+OpenSekai 的多人合作 live，仿照プロセカ的マルチライブ。协议在 `proto/sekai/multiplay/v1/multiplay.proto`：每个玩家一条双向流 `sekai.multiplay.v1.MultiLive/Connect`，第一条消息 `join`，之后服务器在房间每次变化时发完整快照 `room`。鉴权和 `/api/v1` 一样：metadata `authorization: Bearer <游戏会话>`。
+
+- **进程**：gRPC 服务跑在网站同一个 Node 进程里（`src/instrumentation.ts` 启动 `src/lib/multiplay/start.ts`），端口 `MULTIPLAY_GRPC_PORT`（开发 50051，镜像里 3001，生产映射到 `127.0.0.1:8095`），由 OpenResty 以 `grpc_pass` 转发 `/sekai.multiplay.v1.MultiLive/`。`/api/v1/meta` 的 `multiplay.url` 告诉游戏连哪里（`MULTIPLAY_PUBLIC_URL`，默认 `APP_ORIGIN`）。房间只在内存里，重启进程会解散所有房间；只能单实例运行。
+- **房间**：最多 5 人，5 位数字房间号。フリールーム（`quick_match`，进人最多的等待中的公开房间，没有就新开）或私人房间（`create_private`，只能凭房间号进；房主可「ルーム解放」改成公开）。第一个进来的是房主，房主走了顺延。房主按「メンバー決定」开始（至少 `MULTIPLAY_MIN_PLAYERS` 人，默认 2）；公开房间满 2 人后 30 秒自动开始，满 5 人立即开始。房主可以在等待时移出成员。
+- **一局**：选曲 20 秒（社区谱面或おまかせ，选了什么在抽选前对别人隐藏）→ 从大家的选择里随机抽一首（おまかせ＝全站随机）→ 难度 10 秒：同一首歌＝**音频 SHA-256 相同**的谱面，每人各选一个，没选的用自己选的（若是这首歌）或抽中的那张 → 加载最多 90 秒，游戏下载谱面、进入 live、音频就绪后报 `loaded`，全员就绪才发 `start_live`（超时的人这局不参加）→ 演奏中每人约 5 次/秒报分数、连击、血量，服务器每 250 ms 广播一次 → 全员结束（或第一个人结束后 30 秒）出结果，10 秒后回到等待。
+- **FEVER**：自制谱没有 FEVER 标记，所以 FEVER CHANCE 按曲长算：从 45% 处开始，长 `min(20 s, 15%)`；结束后 3 秒进入 FEVER，长度相同。每人在 FEVER CHANCE 结束时报自己这段的判定；2 人以上且全员这段没有 GOOD/BAD/MISS → SUPER FEVER，否则全队 PERFECT+GREAT ≥ 70% → FEVER。FEVER 中的音符 1.5 倍得分（游戏端 `CoopScoreLogic`）。
+- **结果**：按分数排名（同分比 PERFECT、最大连击、血量），第一名 MVP，领先第二名 30% 以上则为 SUPER STAR（至少 2 人完成）；团队分是总和。血量归零不退出，继续打完（标「LIFE 0」）。
+- **断线**：流断开后保留位置 10 秒，用同一房间号 `join` 即可回到房间（游戏自动重连 3 次）；live 中断线的人照样列在结果里（「切断」）。同一账号再连一次会把旧连接踢掉。
+- **聊天**：只有スタンプ（`stamp_id` 0–15，每人每秒最多一个，live 中不能发），文字在游戏里。
+- **限制**：客户端消息平均 40 条/秒，单条 64 KB；服务器最多 2000 个房间；所有客户端上报的数值都会被夹到合理范围。分数由客户端上报，服务器不验算。
+
 ## 本地开发
 
 需要 Node 24+、pnpm、PostgreSQL，以及本地的 OurTaikoSSO（`127.0.0.1:8090`）。统一用 `127.0.0.1`，不要混用 localhost。
@@ -88,6 +102,8 @@ cp .env.example .env.local   # 填 SSO 客户端和密钥
 set -a; . ./.env.local; set +a; pnpm db:migrate
 pnpm dev                      # http://127.0.0.1:3000
 ```
+
+協力ライブ的 gRPC 在 `127.0.0.1:50051`（h2c，`.env.example` 里的 `MULTIPLAY_*`）。游戏连本地时设 `OPENSEKAI_COMMUNITY_URL=http://127.0.0.1:3000`，gRPC 地址从 `/api/v1/meta` 取，也可以用 `OPENSEKAI_MULTIPLAY_URL` 直接指定。游戏登录要求 SSO 里有 `OurTaikoPlay` 游戏客户端：本地用隔离库启动 SSO，`DATABASE_URL=sqlite:///<本仓库>/.data/sso-dev.sqlite3 sh scripts/dev.sh`（库里有 `OurTaikoPlay`、`sekai-fanmade-dev` 和两个测试账号：`sekaiFanmadeTest` 见 `.data/dev-test-account.txt`，第二个玩家 `coopBot` 见 `.data/dev-coop-bot.txt`）。
 
 本地 SSO 里要登记一个 confidential、authorization-code、RS256 的应用，回调 `http://127.0.0.1:3000/auth/callback`。本地存储写在 `.data/storage`，由 `/files/…` 提供。
 

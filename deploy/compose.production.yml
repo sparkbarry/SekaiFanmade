@@ -8,7 +8,8 @@ services:
     env_file:
       - path: /etc/sekai-fanmade/app.env
         format: raw
-    ports: ['127.0.0.1:8094:3000']
+    # 8095: co-op live gRPC (h2c), proxied by OpenResty under /sekai.multiplay.v1.MultiLive/.
+    ports: ['127.0.0.1:8094:3000', '127.0.0.1:8095:3001']
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=1g

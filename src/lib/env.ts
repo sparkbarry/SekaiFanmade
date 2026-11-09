@@ -31,6 +31,14 @@ const schema = z
     UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(1024).default(100),
     UPLOADS_PER_DAY: z.coerce.number().int().min(1).default(20),
     TMP_DIR: z.string().optional(),
+
+    /** Co-op live gRPC server (src/lib/multiplay). Port 0 turns it off. */
+    MULTIPLAY_GRPC_HOST: z.string().default('127.0.0.1'),
+    MULTIPLAY_GRPC_PORT: z.coerce.number().int().min(0).max(65535).default(50051),
+    /** Where the game connects, sent in /api/v1/meta. Defaults to APP_ORIGIN (the proxy routes gRPC). */
+    MULTIPLAY_PUBLIC_URL: z.url().optional(),
+    /** Fewest players a round needs (the original game: 2). */
+    MULTIPLAY_MIN_PLAYERS: z.coerce.number().int().min(1).max(5).default(2),
   })
   .superRefine((v, ctx) => {
     if (v.STORAGE_BACKEND === 's3') {

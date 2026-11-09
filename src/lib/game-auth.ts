@@ -60,7 +60,8 @@ async function introspect(token: string): Promise<IntrospectUser | null> {
   return body.user && /^[0-9a-f]{32}$/.test(body.user.id) ? body.user : null;
 }
 
-async function viewerFromToken(token: string): Promise<Viewer | null> {
+/** The user behind a game session (cached for 30 s), or null. Throws AuthUnavailable when SSO is down. */
+export async function viewerFromToken(token: string): Promise<Viewer | null> {
   const key = sha256Hex(token);
   const hit = cache.get(key);
   if (hit && hit.until > Date.now()) return hit.viewer;

@@ -15,6 +15,11 @@ export async function GET() {
       pageSize: PAGE_SIZE,
       sorts: SORTS,
       difficulties: DIFFICULTIES,
+      // Co-op live (gRPC, proto/sekai/multiplay/v1). Null when this server does not run it.
+      multiplay:
+        e.MULTIPLAY_GRPC_PORT > 0
+          ? { url: e.MULTIPLAY_PUBLIC_URL ?? e.APP_ORIGIN, protocol: 1, maxMembers: 5, minPlayers: e.MULTIPLAY_MIN_PLAYERS }
+          : null,
     },
     { headers: { 'Cache-Control': 'public, max-age=300' } },
   );

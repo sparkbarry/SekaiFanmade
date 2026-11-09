@@ -76,6 +76,10 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
    `sudo docker exec 1Panel-openresty-kHwB openresty -t && sudo docker exec 1Panel-openresty-kHwB openresty -s reload`
 5. `deploy/release.sh`。
 
+## 協力ライブ（gRPC）上线前
+
+`deploy/sekai.locations.conf` 里有 `location /sekai.multiplay.v1.MultiLive/ { grpc_pass grpc://127.0.0.1:8095; … }`，Compose 多映射了 `127.0.0.1:8095:3001`。gRPC 要求 HTTP/2：1Panel 站点 `sekai.ourtaiko.org` 的 443 必须开 HTTP/2（`listen 443 ssl http2;` 或 `http2 on;`），否则游戏连不上（网站本身不受影响）。上线步骤：发布新镜像 → 服务器上更新 `/www/sites/sekai.ourtaiko.org/sekai.conf` → 确认站点 http2 → `openresty -t` 后 reload → 用 grpcurl 或游戏连一次。
+
 ## 还没有接入
 
 - 每日备份：Fanmade 仓库 `deploy/backup/` 的共享备份程序还没有加 `sekai_fanmade` 库。
