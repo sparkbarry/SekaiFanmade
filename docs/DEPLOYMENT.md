@@ -169,3 +169,10 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 反向代理：站点 443 已经是 `http2 on;`，不用改。服务器上的 `/opt/1panel/www/sites/sekai.ourtaiko.org/sekai.conf`（容器内 `/www/sites/…`）与上一版仓库文件一致，备份为同目录 `sekai.conf.before-coop-20261109T080743Z`，换成新的 `deploy/sekai.locations.conf`，`openresty -t` 通过后 reload。
 - 核对：从外网经 `sekai.ourtaiko.org:443`（TLS + HTTP/2）调 `Connect`：不带令牌返回 `UNAUTHENTICATED AUTH_REQUIRED`；伪造的 64 位令牌同样 `UNAUTHENTICATED`（约 0.8 s，说明向生产 SSO introspect 正常，不是 `UNAVAILABLE`）。`/api/v1/meta` 的 `multiplay.url` 是 `https://sekai.ourtaiko.org`。首页、`/readyz`、`/api/v1/charts` 200；fanmade、database、profile 200，sso 302，与之前相同。
 - 没有验证：没用真实账号在生产上开房间、打一局；游戏还没发布带協力ライブ的版本。本地（游戏 + 脚本玩家，本地 SSO）完整走通过一局。
+
+### 2026-11-09 谱师署名（`05abefc`，迁移 0007）
+
+- 内容：`charts.note_designer`（text，默认 `''`），取自上传 manifest 的 `noteDesigner`；谱面页显示「谱师」，搜索能搜到，谱面接口返回 `noteDesigner`；管理页可以改，改动同时写进存着的 manifest。不读旧的 `userName`，已有谱面不回填。游戏端是 OpenSekai `0592920`（manifest 的 `userName` 换成 `noteDesigner`）。
+- 发布前：1 首谱面，迁移 7 条，无 `idle in transaction`。备份 `/var/backups/sekai-fanmade/pre-0007-20261109T175043Z.dump`（root 600，`pg_restore --list` 列出 11 张表的数据）。
+- 发布后：迁移 8 条，`note_designer` 列存在（`NOT NULL`，默认 `''`）；谱面 1 的署名为空，manifest 仍是原来的（有 `userName`，没有 `noteDesigner`）。容器 healthy，label 是 `05abefc…`，日志无错误。首页、上传页、`/readyz`、`/api/v1/charts`、`/api/v1/meta`、谱面页 200，谱面接口有 `noteDesigner`；未登录打开管理页 307。
+- 没有验证：没有在生产上登录改署名，也没有用新版游戏上传。本地开发库里在事务中试过更新语句（列和 manifest 都改了，其他字段不变）后回滚。
