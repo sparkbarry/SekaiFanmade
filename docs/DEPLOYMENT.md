@@ -79,3 +79,12 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 
 - 每日备份：Fanmade 仓库 `deploy/backup/` 的共享备份程序还没有加 `sekai_fanmade` 库。
 - CI：仓库还没有 GitHub 远端，发布靠本机 `deploy/release.sh`。
+
+## 记录
+
+### 2026-11-09 首次部署（`e4cff24`）
+
+- 服务器：建了库 `sekai_fanmade` 和同名属主角色（`REVOKE ALL … FROM PUBLIC`，只给该角色 CONNECT/TEMPORARY）；它对其他四个库的表都没有读权限（`ourtaiko_sso`、`ourtaiko_fanmade` 对 PUBLIC 开放 CONNECT 是原有设置，没改）。在生产 SSO 登记了 `sekai-fanmade-prod`（密钥哈希保存，明文只在 `app.env`）。`/etc/sekai-fanmade/app.env` 已写好，`ADMIN_USER_IDS` 与 AWS 密钥两行留空。
+- `deploy/release.sh` 发布：镜像包 81 MB，容器 healthy，内存约 80 MiB，迁移建了 6 张表；本机 `127.0.0.1:8094` 首页、`/api/v1/charts` 200，`/auth/login` 303 到 `sso.ourtaiko.org/o/authorize/`（回调 `https://sekai.ourtaiko.org/auth/callback`，`__Host-` Secure Cookie）。其他容器状态不变。
+- 本机验证（不是生产）：本地 SSO（隔离的 SQLite 库）上走通登录、授权、回调、上传真实谱面、替换（旧版本对象删除）、喜欢、评论、删除、退出（refresh 与 access token 都撤销）；伪造 Origin 的上传与退出 403；浅色、深色、375 px 宽度看过。生产镜像在只读根文件系统下本机跑过。
+- 还没做：DNS、1Panel 站点与证书、站点 include；IAM 密钥与 CloudFront 行为；所以生产上还没有登录或上传过。
