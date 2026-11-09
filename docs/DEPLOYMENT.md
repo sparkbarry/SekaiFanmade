@@ -87,4 +87,5 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 服务器：建了库 `sekai_fanmade` 和同名属主角色（`REVOKE ALL … FROM PUBLIC`，只给该角色 CONNECT/TEMPORARY）；它对其他四个库的表都没有读权限（`ourtaiko_sso`、`ourtaiko_fanmade` 对 PUBLIC 开放 CONNECT 是原有设置，没改）。在生产 SSO 登记了 `sekai-fanmade-prod`（密钥哈希保存，明文只在 `app.env`）。`/etc/sekai-fanmade/app.env` 已写好，`ADMIN_USER_IDS` 与 AWS 密钥两行留空。
 - `deploy/release.sh` 发布：镜像包 81 MB，容器 healthy，内存约 80 MiB，迁移建了 6 张表；本机 `127.0.0.1:8094` 首页、`/api/v1/charts` 200，`/auth/login` 303 到 `sso.ourtaiko.org/o/authorize/`（回调 `https://sekai.ourtaiko.org/auth/callback`，`__Host-` Secure Cookie）。其他容器状态不变。
 - 本机验证（不是生产）：本地 SSO（隔离的 SQLite 库）上走通登录、授权、回调、上传真实谱面、替换（旧版本对象删除）、喜欢、评论、删除、退出（refresh 与 access token 都撤销）；伪造 Origin 的上传与退出 403；浅色、深色、375 px 宽度看过。生产镜像在只读根文件系统下本机跑过。
-- 还没做：DNS、1Panel 站点与证书、站点 include；IAM 密钥与 CloudFront 行为；所以生产上还没有登录或上传过。
+- 用户随后加了 DNS（灰云）、在 1Panel 建了静态站点并签了 Let's Encrypt 证书（2027-02-07 到期）。我备份站点配置为同目录 `sekai.ourtaiko.org.conf.before-include-<时间>`，在 `root` 下一行加 include，放 `sekai.conf`，`openresty -t` 通过后 reload。公网核对：首页、`/readyz`、`/api/v1/charts`、`/upload` 200，HTTP 301 到 HTTPS，`/auth/login` 303 到 SSO（回调正确），未登录上传 401；fanmade、database、profile 200，sso 302（登录页），与之前相同。
+- 还没做：IAM 密钥（填进 `app.env` 之前上传会失败）、CloudFront `sekai-fanmade/*` 行为、`ADMIN_USER_IDS`；生产上还没用真实账号登录或上传过。
