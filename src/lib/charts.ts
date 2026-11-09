@@ -301,18 +301,20 @@ async function storeObjects(chartId: number, revision: number, parsed: ParsedPac
 
     let jacketKey: string | null = null;
     if (parsed.jacket) {
-      const webp = path.join(workDir, 'jacket.webp');
+      // JPEG rather than WebP: the game decodes jackets with Texture2D.LoadImage (PNG / JPEG only).
+      const jpeg = path.join(workDir, 'jacket.jpg');
       try {
         await sharp(parsed.jacket.path, { limitInputPixels: 64_000_000 })
           .rotate()
           .resize(512, 512, { fit: 'cover' })
-          .webp({ quality: 86 })
-          .toFile(webp);
+          .flatten({ background: '#ffffff' })
+          .jpeg({ quality: 88, mozjpeg: true })
+          .toFile(jpeg);
       } catch {
         throw new PackageError(`${parsed.jacket.name} 无法解码。`);
       }
-      jacketKey = `${prefix}/jacket.webp`;
-      await s.put(jacketKey, { file: webp }, { contentType: 'image/webp' });
+      jacketKey = `${prefix}/jacket.jpg`;
+      await s.put(jacketKey, { file: jpeg }, { contentType: 'image/jpeg' });
       put.push(jacketKey);
     }
     return { packageKey, packageSize: pkg.size, packageSha256: pkg.sha256, jacketKey, audioKey };
