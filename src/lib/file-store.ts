@@ -13,7 +13,7 @@ import { storage } from '@/lib/storage';
  * refers to it being committed.
  */
 
-type Tx = Parameters<Parameters<ReturnType<typeof db>['transaction']>[0]>[0];
+export type Tx = Parameters<Parameters<ReturnType<typeof db>['transaction']>[0]>[0];
 
 export interface LocalFile {
   path: string;
@@ -68,7 +68,16 @@ export async function releaseFiles(fileIds: (number | null | undefined)[]): Prom
       const [ref] = await tx
         .select({ one: sql`1` })
         .from(charts)
-        .where(or(eq(charts.packageFileId, id), eq(charts.audioFileId, id), eq(charts.jacketFileId, id)))
+        .where(
+          or(
+            eq(charts.packageFileId, id),
+            eq(charts.scoreFileId, id),
+            eq(charts.audioFileId, id),
+            eq(charts.jacketFileId, id),
+            eq(charts.jacketSourceFileId, id),
+            eq(charts.videoFileId, id),
+          ),
+        )
         .limit(1);
       if (ref) return;
       await tx.delete(files).where(eq(files.id, id));

@@ -4,16 +4,15 @@ import { notFound, redirect } from 'next/navigation';
 import { BookmarkButton } from '@/components/bookmark-button';
 import { Jacket } from '@/components/chart-card';
 import { Comments } from '@/components/comments';
+import { DownloadButton } from '@/components/download-button';
 import { PageBar } from '@/components/page-bar';
 import { PreviewPlayer } from '@/components/preview-player';
 import {
   Avatar,
-  buttonClass,
   ButtonLink,
   Chip,
   DifficultyBadge,
   DIFFICULTY_LABEL,
-  DownloadIcon,
   formatBytes,
   formatDate,
   InfoIcon,
@@ -21,7 +20,7 @@ import {
   Section,
 } from '@/components/ui';
 import { VoteControl } from '@/components/vote-control';
-import { getChart } from '@/lib/charts';
+import { downloadName, getChart } from '@/lib/charts';
 import { getViewer } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -113,10 +112,7 @@ export default async function ChartPage({ params }: { params: Params }) {
             <Jacket url={chart.jacketUrl} title={chart.title} difficulty={chart.difficulty} />
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <a href={`/charts/${chart.id}/download`} className={buttonClass('default', 'min-h-12 px-6 text-[15px]')}>
-              <DownloadIcon className="size-[18px]" />
-              下载 ZIP · {formatBytes(chart.packageSize)}
-            </a>
+            <DownloadButton chartId={chart.id} pkg={chart.package ?? null} fileName={downloadName(chart)} size={chart.packageSize} />
             <PreviewPlayer src={chart.audioUrl} start={chart.previewStartSec} />
             <VoteControl kind="chart" id={chart.id} score={chart.score} myVote={myVote} signedIn={!!viewer} loginNext={`/charts/${chart.id}`} />
             <BookmarkButton chartId={chart.id} bookmarked={!!mine?.bookmarked} signedIn={!!viewer} loginNext={`/charts/${chart.id}`} />

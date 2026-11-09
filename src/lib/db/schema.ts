@@ -7,6 +7,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   real,
@@ -103,10 +104,23 @@ export const charts = pgTable(
     allowDerivative: boolean().notNull().default(false),
     /** 親譜面: the chart this one was derived from. */
     parentChartId: text().references((): AnyPgColumn => charts.id, { onDelete: 'set null' }),
-    /** Null only on deleted charts, whose files are released (charts_files_check). */
-    packageFileId: bigint({ mode: 'number' }).references(() => files.id),
+    /**
+     * The chart package is kept as its parts, never as a ZIP: the game downloads them and assembles the
+     * folder, the website zips them in the browser. `manifest` is the repacked manifest.json; its file
+     * names are the names the parts get in the folder. Null only on deleted charts (charts_files_check).
+     */
+    manifest: jsonb().$type<Record<string, unknown>>(),
+    scoreFileId: bigint({ mode: 'number' }).references(() => files.id),
     audioFileId: bigint({ mode: 'number' }).references(() => files.id),
+    /** The 512px JPEG for lists and the game's browser. */
     jacketFileId: bigint({ mode: 'number' }).references(() => files.id),
+    /** The cover as uploaded (PNG or JPEG), the package's jacket. */
+    jacketSourceFileId: bigint({ mode: 'number' }).references(() => files.id),
+    videoFileId: bigint({ mode: 'number' }).references(() => files.id),
+    /** Bytes of all parts plus manifest.json: the size of the assembled chart. */
+    packageSize: bigint({ mode: 'number' }).notNull().default(0),
+    /** The ZIP of charts uploaded before the parts were stored separately; lib/package-split.ts empties it. */
+    packageFileId: bigint({ mode: 'number' }).references(() => files.id),
     downloadCount: integer().notNull().default(0),
     /** Plays reported by the game (POST /api/v1/charts/<id>/plays), at most one per player per hour. */
     playCount: integer().notNull().default(0),
@@ -124,7 +138,7 @@ export const charts = pgTable(
     check('charts_id_check', sql`${t.id} ~ '^[0-9a-f]{32}$'`),
     check(
       'charts_files_check',
-      sql`${t.deletedAt} is not null or (${t.packageFileId} is not null and ${t.audioFileId} is not null)`,
+      sql`${t.deletedAt} is not null or (${t.audioFileId} is not null and (${t.packageFileId} is not null or (${t.scoreFileId} is not null and ${t.manifest} is not null)))`,
     ),
     check('charts_difficulty_check', sql`${t.difficulty} in ('easy','normal','hard','expert','master','append')`),
     check('charts_level_check', sql`${t.playLevel} between 0 and 99`),

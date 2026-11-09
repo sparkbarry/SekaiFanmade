@@ -9,7 +9,7 @@ import sharp from 'sharp';
 import { sha256Hex } from '@/lib/crypto';
 import { bookmarks, chartPlays, charts, chartVotes, db, DIFFICULTIES, files, users, type Difficulty } from '@/lib/db';
 import { env } from '@/lib/env';
-import { inFileTransaction, releaseFiles, storeFile, type StoredFile } from '@/lib/file-store';
+import { inFileTransaction, releaseFiles, storeFile, type StoredFile, type Tx } from '@/lib/file-store';
 import { PackageError, parsePackage, type ParsedPackage } from '@/lib/package';
 import { Forbidden, type Viewer } from '@/lib/session';
 import { storage } from '@/lib/storage';
@@ -48,9 +48,11 @@ function refCondition(ref: { id: string } | { numberId: number }): SQL {
   return 'id' in ref ? eq(charts.id, ref.id) : eq(charts.numberId, ref.numberId);
 }
 
-const packageFile = alias(files, 'package_file');
+const scoreFile = alias(files, 'score_file');
 const audioFile = alias(files, 'audio_file');
 const jacketFile = alias(files, 'jacket_file');
+const jacketSourceFile = alias(files, 'jacket_source_file');
+const videoFile = alias(files, 'video_file');
 
 const chartColumns = {
   id: charts.id,
@@ -68,10 +70,21 @@ const chartColumns = {
   previewStartSec: charts.previewStartSec,
   hasVideo: charts.hasVideo,
   revision: charts.revision,
-  packageStorageKey: packageFile.storageKey,
-  packageByteSize: packageFile.byteSize,
+  packageSize: charts.packageSize,
+  manifest: charts.manifest,
+  scoreStorageKey: scoreFile.storageKey,
+  scoreByteSize: scoreFile.byteSize,
+  scoreSha256: scoreFile.sha256,
   audioStorageKey: audioFile.storageKey,
+  audioByteSize: audioFile.byteSize,
+  audioSha256: audioFile.sha256,
   jacketStorageKey: jacketFile.storageKey,
+  jacketSourceStorageKey: jacketSourceFile.storageKey,
+  jacketSourceByteSize: jacketSourceFile.byteSize,
+  jacketSourceSha256: jacketSourceFile.sha256,
+  videoStorageKey: videoFile.storageKey,
+  videoByteSize: videoFile.byteSize,
+  videoSha256: videoFile.sha256,
   downloadCount: charts.downloadCount,
   playCount: charts.playCount,
   upvotes: charts.upvotes,
@@ -108,7 +121,11 @@ export interface ChartSummary {
   packageSize: number;
   jacketUrl: string | null;
   audioUrl: string;
-  packageUrl: string;
+  /**
+   * The chart folder as parts (single-chart reads only): write manifest.json and each file under its
+   * name, and the folder is the chart. Null for a chart still waiting to be split from its old ZIP.
+   */
+  package?: ChartPackage | null;
   downloadCount: number;
   playCount: number;
   /** upvotes - downvotes */
@@ -129,12 +146,43 @@ export interface ChartSummary {
   uploader: { id: string; nickname: string; avatarUrl: string | null };
 }
 
+export interface ChartPackageFile {
+  role: 'score' | 'audio' | 'jacket' | 'video';
+  /** The file's name in the chart folder, as manifest.json refers to it. */
+  name: string;
+  url: string;
+  size: number;
+  sha256: string;
+}
+
+export interface ChartPackage {
+  manifest: Record<string, unknown>;
+  files: ChartPackageFile[];
+}
+
 type ChartRow = Awaited<ReturnType<typeof selectCharts>>[number];
 
-function toSummary(r: ChartRow): ChartSummary {
+function packageOf(r: ChartRow): ChartPackage | null {
+  const m = r.manifest;
+  if (!m || !r.scoreStorageKey || !r.audioStorageKey) return null;
   const s = storage();
-  // Live charts always have a package and audio (charts_files_check).
-  const packageKey = r.packageStorageKey ?? '';
+  const name = (key: string) => (typeof m[key] === 'string' ? (m[key] as string) : '');
+  const out: ChartPackageFile[] = [
+    { role: 'score', name: name('scoreFileName'), url: s.publicUrl(r.scoreStorageKey), size: r.scoreByteSize ?? 0, sha256: r.scoreSha256 ?? '' },
+    { role: 'audio', name: name('audioFileName'), url: s.publicUrl(r.audioStorageKey), size: r.audioByteSize ?? 0, sha256: r.audioSha256 ?? '' },
+  ];
+  if (r.jacketSourceStorageKey && name('jacketFileName')) {
+    out.push({ role: 'jacket', name: name('jacketFileName'), url: s.publicUrl(r.jacketSourceStorageKey), size: r.jacketSourceByteSize ?? 0, sha256: r.jacketSourceSha256 ?? '' });
+  }
+  if (r.videoStorageKey && name('videoFileName')) {
+    out.push({ role: 'video', name: name('videoFileName'), url: s.publicUrl(r.videoStorageKey), size: r.videoByteSize ?? 0, sha256: r.videoSha256 ?? '' });
+  }
+  return { manifest: m, files: out };
+}
+
+function toSummary(r: ChartRow, withPackage = false): ChartSummary {
+  const s = storage();
+  // Live charts always have audio (charts_files_check).
   const audioKey = r.audioStorageKey ?? '';
   const jacketKey = r.jacketStorageKey;
   return {
@@ -153,10 +201,10 @@ function toSummary(r: ChartRow): ChartSummary {
     previewStartSec: r.previewStartSec,
     hasVideo: r.hasVideo,
     revision: r.revision,
-    packageSize: r.packageByteSize ?? 0,
+    packageSize: r.packageSize,
     jacketUrl: jacketKey ? s.publicUrl(jacketKey) : null,
     audioUrl: s.publicUrl(audioKey),
-    packageUrl: s.publicUrl(packageKey),
+    ...(withPackage ? { package: packageOf(r) } : {}),
     downloadCount: r.downloadCount,
     playCount: r.playCount,
     score: r.upvotes - r.downvotes,
@@ -177,9 +225,11 @@ function selectCharts() {
     .select(chartColumns)
     .from(charts)
     .innerJoin(users, eq(users.id, charts.uploaderId))
-    .leftJoin(packageFile, eq(packageFile.id, charts.packageFileId))
+    .leftJoin(scoreFile, eq(scoreFile.id, charts.scoreFileId))
     .leftJoin(audioFile, eq(audioFile.id, charts.audioFileId))
-    .leftJoin(jacketFile, eq(jacketFile.id, charts.jacketFileId));
+    .leftJoin(jacketFile, eq(jacketFile.id, charts.jacketFileId))
+    .leftJoin(jacketSourceFile, eq(jacketSourceFile.id, charts.jacketSourceFileId))
+    .leftJoin(videoFile, eq(videoFile.id, charts.videoFileId));
 }
 
 export interface ListQuery {
@@ -268,7 +318,7 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
       .offset((page - 1) * PAGE_SIZE),
     db().select({ total: count() }).from(charts).innerJoin(users, eq(users.id, charts.uploaderId)).where(filter),
   ]);
-  const items = rows.map(toSummary);
+  const items = rows.map((r) => toSummary(r));
   if (query.viewerId) await addViewerFlags(items, query.viewerId);
   return { items, total, page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)) };
 }
@@ -300,7 +350,7 @@ export async function getChart(ref: string, viewerId?: string): Promise<ChartSum
   if (!parsed) return null;
   const [row] = await selectCharts().where(and(refCondition(parsed), isNull(charts.deletedAt)));
   if (!row) return null;
-  const chart = toSummary(row);
+  const chart = toSummary(row, true);
   if (viewerId) await addViewerFlags([chart], viewerId);
   return chart;
 }
@@ -321,34 +371,72 @@ async function withWorkDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
-/** The package's files, ready to store: the normalized ZIP, the audio, and a 512px JPEG jacket. */
-async function prepareFiles(parsed: ParsedPackage, workDir: string) {
-  const m = parsed.manifest;
-  let jacket: string | null = null;
+const SCORE_TYPES: Record<string, string> = { json: 'application/json', sus: 'text/plain; charset=utf-8' };
+
+/**
+ * The package's parts, ready to store: the score, the audio, the cover as uploaded plus a 512px JPEG of it
+ * (lists and the game's browser), and the MV. No ZIP: the game and the website assemble the folder.
+ */
+export async function prepareFiles(parsed: ParsedPackage, workDir: string) {
+  let thumb: string | null = null;
   if (parsed.jacket) {
     // JPEG rather than WebP: the game decodes jackets with Texture2D.LoadImage (PNG / JPEG only).
-    jacket = path.join(workDir, 'jacket.jpg');
+    thumb = path.join(workDir, 'jacket-512.jpg');
     try {
       await sharp(parsed.jacket.path, { limitInputPixels: 64_000_000 })
         .rotate()
         .resize(512, 512, { fit: 'cover' })
         .flatten({ background: '#ffffff' })
         .jpeg({ quality: 88, mozjpeg: true })
-        .toFile(jacket);
+        .toFile(thumb);
     } catch {
       throw new PackageError(`${parsed.jacket.name} 无法解码。`);
     }
   }
+  const scoreExtension = path.extname(parsed.score.name).slice(1).toLowerCase();
+  const manifestBytes = Buffer.byteLength(JSON.stringify(parsed.manifest, null, 2));
   return {
-    package: {
-      path: parsed.packagePath,
-      extension: 'zip',
-      contentType: 'application/zip',
-      downloadName: downloadName({ scoreTitle: m.scoreTitle, difficulty: m.musicDifficultyType, playLevel: m.playLevel }),
-    },
+    manifest: parsed.manifest as Record<string, unknown>,
+    packageSize: manifestBytes + parsed.score.size + parsed.audio.size + (parsed.jacket?.size ?? 0) + (parsed.video?.size ?? 0),
+    score: { path: parsed.score.path, extension: scoreExtension, contentType: SCORE_TYPES[scoreExtension] ?? 'application/octet-stream' },
     audio: { path: parsed.audio.path, extension: parsed.audio.extension, contentType: parsed.audio.contentType },
-    jacket: jacket ? { path: jacket, extension: 'jpg', contentType: 'image/jpeg' } : null,
+    jacket: thumb ? { path: thumb, extension: 'jpg', contentType: 'image/jpeg' } : null,
+    jacketSource: parsed.jacket
+      ? { path: parsed.jacket.path, extension: parsed.jacket.contentType === 'image/png' ? 'png' : 'jpg', contentType: parsed.jacket.contentType }
+      : null,
+    video: parsed.video ? { path: parsed.video.path, extension: 'mp4', contentType: 'video/mp4' } : null,
   };
+}
+
+/** Stores the parts (each by hash) and returns the chart columns that point at them. */
+export async function storeParts(tx: Tx, prepared: Awaited<ReturnType<typeof prepareFiles>>, uploaded: string[]) {
+  const score = await storeFile(tx, prepared.score, uploaded);
+  const audio = await storeFile(tx, prepared.audio, uploaded);
+  const jacket: StoredFile | null = prepared.jacket ? await storeFile(tx, prepared.jacket, uploaded) : null;
+  const jacketSource: StoredFile | null = prepared.jacketSource ? await storeFile(tx, prepared.jacketSource, uploaded) : null;
+  const video: StoredFile | null = prepared.video ? await storeFile(tx, prepared.video, uploaded) : null;
+  return {
+    manifest: prepared.manifest,
+    packageSize: prepared.packageSize,
+    scoreFileId: score.id,
+    audioFileId: audio.id,
+    jacketFileId: jacket?.id ?? null,
+    jacketSourceFileId: jacketSource?.id ?? null,
+    videoFileId: video?.id ?? null,
+    packageFileId: null,
+  };
+}
+
+/** Every file a chart row refers to, for releaseFiles. */
+export function chartFileIds(row: {
+  packageFileId: number | null;
+  scoreFileId: number | null;
+  audioFileId: number | null;
+  jacketFileId: number | null;
+  jacketSourceFileId: number | null;
+  videoFileId: number | null;
+}) {
+  return [row.packageFileId, row.scoreFileId, row.audioFileId, row.jacketFileId, row.jacketSourceFileId, row.videoFileId];
 }
 
 function metadataFrom(parsed: ParsedPackage) {
@@ -386,18 +474,14 @@ export async function createChart(viewer: Viewer, zipPath: string): Promise<stri
     const id = newChartId();
     const uploaded: string[] = [];
     await inFileTransaction(uploaded, async (tx) => {
-      const pkg = await storeFile(tx, prepared.package, uploaded);
-      const audio = await storeFile(tx, prepared.audio, uploaded);
-      const jacket: StoredFile | null = prepared.jacket ? await storeFile(tx, prepared.jacket, uploaded) : null;
+      const parts = await storeParts(tx, prepared, uploaded);
       await tx.insert(charts).values({
         id,
         uploaderId: viewer.id,
         ...metadataFrom(parsed),
         description: parsed.manifest.description.slice(0, 2000),
         revision: 1,
-        packageFileId: pkg.id,
-        audioFileId: audio.id,
-        jacketFileId: jacket?.id ?? null,
+        ...parts,
       });
     });
     return id;
@@ -425,18 +509,14 @@ export async function replaceChart(viewer: Viewer, chartId: string, zipPath: str
     const prepared = await prepareFiles(parsed, dir);
     const uploaded: string[] = [];
     await inFileTransaction(uploaded, async (tx) => {
-      const pkg = await storeFile(tx, prepared.package, uploaded);
-      const audio = await storeFile(tx, prepared.audio, uploaded);
-      const jacket: StoredFile | null = prepared.jacket ? await storeFile(tx, prepared.jacket, uploaded) : null;
+      const parts = await storeParts(tx, prepared, uploaded);
       const updated = await tx
         .update(charts)
         .set({
           ...metadataFrom(parsed),
           revision: current.revision + 1,
           updatedAt: new Date(),
-          packageFileId: pkg.id,
-          audioFileId: audio.id,
-          jacketFileId: jacket?.id ?? null,
+          ...parts,
         })
         .where(and(eq(charts.id, current.id), eq(charts.revision, current.revision), isNull(charts.deletedAt)))
         .returning({ id: charts.id });
@@ -444,7 +524,7 @@ export async function replaceChart(viewer: Viewer, chartId: string, zipPath: str
     });
   });
   // After the commit: the old files are released unless another chart (or the new revision) still uses them.
-  await releaseFiles([current.packageFileId, current.audioFileId, current.jacketFileId]);
+  await releaseFiles(chartFileIds(current));
 }
 
 export interface ChartInfoUpdate {
@@ -491,14 +571,18 @@ export async function deleteChart(viewer: Viewer, chartId: string): Promise<void
     .update(charts)
     .set({
       deletedAt: new Date(),
+      manifest: null,
       packageFileId: null,
+      scoreFileId: null,
       audioFileId: null,
       jacketFileId: null,
+      jacketSourceFileId: null,
+      videoFileId: null,
     })
     .where(and(eq(charts.id, row.id), isNull(charts.deletedAt)))
     .returning({ id: charts.id });
   if (!done) return;
-  await releaseFiles([row.packageFileId, row.audioFileId, row.jacketFileId]);
+  await releaseFiles(chartFileIds(row));
 }
 
 /* ---------- interactions ---------- */
@@ -564,16 +648,15 @@ export async function listTags(limit = 30): Promise<{ tag: string; count: number
   return rows.map((r) => ({ tag: r.tag, count: Number(r.count) }));
 }
 
-/** Counts a download and returns the package's CDN URL. */
-export async function recordDownload(ref: string): Promise<string | null> {
+/** Counts a download (the website's ZIP or the game's). False when the chart does not exist. */
+export async function recordDownload(ref: string): Promise<boolean> {
   const chartId = await liveChartId(ref);
-  if (!chartId) return null;
+  if (!chartId) return false;
   await db()
     .update(charts)
     .set({ downloadCount: sql`${charts.downloadCount} + 1` })
     .where(eq(charts.id, chartId));
-  const chart = await getChart(chartId);
-  return chart?.packageUrl ?? null;
+  return true;
 }
 
 export async function getUser(id: string) {

@@ -3,14 +3,14 @@ import { mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import yauzl from 'yauzl';
-import yazl from 'yazl';
 import { DIFFICULTIES, type Difficulty } from '@/lib/db/schema';
 
 /**
  * Reads a chart package exported by OpenSekai's custom chart manager (导出ZIP):
  * a folder with manifest.json, score.json (or SUS), the audio, the jacket and an
  * optional mp4. The game finds the folder by looking for manifest.json, first at
- * the ZIP root and then in subfolders, so this does the same.
+ * the ZIP root and then in subfolders, so this does the same. The parts are kept apart (never
+ * re-zipped): the game and the website put the folder together again from them.
  */
 
 export class PackageError extends Error {
@@ -75,8 +75,6 @@ export interface ParsedPackage {
   audio: ExtractedFile & { extension: 'ogg' | 'mp3' | 'wav'; contentType: string };
   jacket: (ExtractedFile & { contentType: string }) | null;
   video: ExtractedFile | null;
-  /** Normalized ZIP holding only the files above, at its root. */
-  packagePath: string;
 }
 
 const AUDIO_EXTENSIONS = ['.ogg', '.mp3', '.wav'];
@@ -330,39 +328,14 @@ export async function parsePackage(
       manifest.videoFileName = '';
     }
 
-    const kept = [
-      { name: scoreName, path: scorePath, compress: true },
-      { name: audioName, path: audioPath, compress: false },
-      ...(jacket ? [{ name: jacket.name, path: jacket.path, compress: false }] : []),
-      ...(video ? [{ name: video.name, path: video.path, compress: false }] : []),
-    ];
-    const packagePath = path.join(workDir, 'package.zip');
-    await writePackage(packagePath, manifest, kept);
-
     return {
       manifest,
       score: { name: scoreName, path: scorePath, size: scoreEntry.size },
       audio: { name: audioName, path: audioPath, size: audioEntry.size, ...audioType },
       jacket,
       video,
-      packagePath,
     };
   } finally {
     zip.close();
   }
-}
-
-async function writePackage(
-  dest: string,
-  manifest: ChartManifest,
-  files: { name: string; path: string; compress: boolean }[],
-): Promise<void> {
-  const out = new yazl.ZipFile();
-  // A fixed timestamp makes the ZIP depend only on its contents, so the same package stored twice
-  // gets the same hash and shares one object.
-  const mtime = new Date(Date.UTC(2020, 0, 1));
-  out.addBuffer(Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'), 'manifest.json', { mtime });
-  for (const f of files) out.addFile(f.path, f.name, { compress: f.compress, mtime });
-  out.end();
-  await pipeline(out.outputStream, createWriteStream(dest, { flags: 'wx' }));
 }

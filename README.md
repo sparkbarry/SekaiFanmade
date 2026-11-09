@@ -6,23 +6,24 @@ OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上�
 
 ## 谱面包
 
-上传的是 OpenSekai 自制谱管理里「导出ZIP」得到的文件：一个文件夹，含 `manifest.json`、`score.json`（或 SUS）、音频（ogg / mp3 / wav）、封面（png / jpg，可选）和 MV（mp4，可选）。服务器按游戏 `FindEntryRoot` 的规则找 `manifest.json`，校验各文件后**只把这几个文件重新打包到 ZIP 根目录**，丢掉其他内容。曲名、难度、等级、作者都取自 manifest；网站上只能改简介，要改曲目信息就上传新版本。
+上传的是 OpenSekai 自制谱管理里「导出ZIP」得到的文件：一个文件夹，含 `manifest.json`、`score.json`（或 SUS）、音频（ogg / mp3 / wav）、封面（png / jpg，可选）和 MV（mp4，可选）。服务器按游戏 `FindEntryRoot` 的规则找 `manifest.json`，校验后**只保留这几个文件，分开存放，不再保存 ZIP**，丢掉其他内容。曲名、难度、等级、作者都取自 manifest；网站上只能改简介，要改曲目信息就上传新版本。
 
 ## ID 与存储
 
 参照 OurTaiko Fanmade：
 
 - 谱面 `id` 是 32 位随机小写十六进制（网址 `/charts/<id>`、API、游戏都用它）；另有递增的 `numberId`，给人手输（游戏的「譜面ID検索」、网站搜索 `#12`、`/charts/12` 会跳到 id 网址）。2026-11-09 之前的谱面保留了原来的数字作为 `numberId`。
-- 对象按内容寻址，平铺在 `sekai-fanmade/` 下，名字是 `<sha256>.<扩展名>`，CDN 缓存一年：谱面包 `.zip`（重新打包的 ZIP 时间戳固定，同样的内容得到同样的哈希；Content-Disposition 是第一次存入时的文件名）、音频 `.ogg`／`.mp3`／`.wav`、512×512 JPEG 封面 `.jpg`（游戏只能解码 PNG／JPEG）。
-- `files` 表每个对象一行，`charts.package_file_id`／`audio_file_id`／`jacket_file_id` 引用它；内容相同的上传共用一行和一个对象。与 Fanmade 不同，谱面包 ZIP 也存进桶里，游戏从 CDN 下载，不在服务器上现场打包。
+- 对象按内容寻址，平铺在 `sekai-fanmade/` 下，名字是 `<sha256>.<扩展名>`，CDN 缓存一年：谱面 `.json`／`.sus`、音频 `.ogg`／`.mp3`／`.wav`、原始封面 `.png`／`.jpg`、512×512 JPEG 缩略图 `.jpg`（游戏只能解码 PNG／JPEG）、MV `.mp4`。
+- 谱面包不存 ZIP：`charts.manifest`（jsonb）是重写过的 manifest.json，`score_file_id`／`audio_file_id`／`jacket_source_file_id`／`video_file_id` 是它引用的文件，`jacket_file_id` 是缩略图，`package_size` 是这些加起来的大小。单个谱面的接口返回 `package: { manifest, files: [{ role, name, url, size, sha256 }] }`：把 manifest.json 和各文件按 `name` 写进一个文件夹就是谱面。游戏这样下载后导入；网站的「下载 ZIP」在浏览器里用 JSZip 打包；两者都 `POST /api/v1/charts/<id>/downloads` 计数。这样音频只存一份，服务器不打包也不转发文件。
+- `files` 表每个对象一行，谱面的各列引用它；内容相同的上传共用一行和一个对象（同一首歌的多张谱面共用音频）。
 - 替换或删除谱面后，`releaseFiles` 删掉不再被任何谱面引用的对象；存入和删除同一个键时用 `pg_advisory_xact_lock` 串行。事务失败时，本次上传的对象若没有 `files` 行就删掉（`discardUnreferenced`）。删不掉的记进 `retired_objects`，后台每 10 分钟重试（`src/lib/jobs.ts`）。
-- 迁移 0002 之前的谱面用的是 `charts/<number>/r<revision>/...`，由 `bb6954e` 的启动任务搬成哈希对象；迁移 0003 删掉了旧列，并加了 `charts_files_check`（没删除的谱面必须有谱面包和音频）。
+- 迁移 0002 之前的谱面用的是 `charts/<number>/r<revision>/...`，由 `bb6954e` 的启动任务搬成哈希对象；迁移 0003 删掉了旧列，并加了 `charts_files_check`。迁移 0005 之前的谱面存的是重新打包的 ZIP（`package_file_id`），由启动任务 `src/lib/package-split.ts` 拆成各部分并删除 ZIP。
 
 ## 代码结构
 
 | 位置 | 内容 |
 | --- | --- |
-| `src/lib/package.ts` | ZIP 校验与重新打包（有单元测试） |
+| `src/lib/package.ts` | 上传 ZIP 的校验与拆分（有单元测试） |
 | `src/lib/charts.ts` | 谱面、列表排序、收藏、下载与游玩计数 |
 | `src/lib/votes.ts`、`comments.ts`、`comment-folding.ts` | 赞踩、评论、karma、回复折叠（有单元测试） |
 | `src/lib/session.ts`、`oidc.ts`、`crypto.ts` | SSO 登录与会话 |
@@ -62,7 +63,7 @@ OIDC 授权码 + S256 PKCE，confidential client（HTTP Basic），scope `openid
 | --- | --- |
 | `GET /api/v1/meta` | 站点信息与游戏会话要用的 service |
 | `GET /api/v1/charts?q=&tag=&difficulty=&sort=&seed=&page=` | `sort`：`hot`、`new`、`top`、`comments`、`daily`、`plays`、`downloads`、`updated`、`hard`、`random`（配 `seed`）及别名 → `{ items, total, page, pages }` |
-| `GET /api/v1/charts/<id 或 numberId>` | 单个谱面（`score`、`upvotes`、`downvotes`，登录时还有 `myVote`、`bookmarked`） |
+| `GET /api/v1/charts/<id 或 numberId>` | 单个谱面（`score`、`upvotes`、`downvotes`、`package`，登录时还有 `myVote`、`bookmarked`） |
 | `PUT /api/v1/charts/<id>/vote` | `{ value: 1 \| 0 \| -1 }` → `{ score, upvotes, downvotes, myVote }` |
 | `PUT`／`DELETE /api/v1/charts/<id>/bookmark` | 收藏（游戏的マイリスト） |
 | `POST /api/v1/charts/<id>/plays` | 报一次游玩（同一人每小时一次） |
@@ -72,7 +73,8 @@ OIDC 授权码 + S256 PKCE，confidential client（HTTP Basic），scope `openid
 | `PUT /api/v1/comments/<id>/vote` | `{ value }` → `{ score, myVote }` |
 | `GET /api/v1/me`、`/api/v1/me/bookmarks`、`/api/v1/tags` | 当前用户、收藏列表、标签 |
 | `PUT /api/v1/uploads?chart=` | 上传谱面包（原始 ZIP 作为请求体；带 `chart` 时替换自己的这份谱面）。网站和游戏的「自制谱管理 › 上传」都用它 |
-| `GET /charts/<id 或 numberId>/download` | 计一次下载，302 到 CDN 上的 ZIP |
+| `POST /api/v1/charts/<id>/downloads` | 计一次下载（网站和游戏自己从 CDN 取文件） |
+| `GET /charts/<id 或 numberId>/download` | 旧链接，302 到谱面页 |
 | `GET /readyz` | 健康检查 |
 
 ## 本地开发

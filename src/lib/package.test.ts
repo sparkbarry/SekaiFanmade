@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import yauzl from 'yauzl';
 import yazl from 'yazl';
 import { normalizeManifest, PackageError, parsePackage } from './package';
 
@@ -49,23 +48,8 @@ async function work() {
   return mkdtemp(path.join(dir, 'work-'));
 }
 
-function names(zipPath: string): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    yauzl.open(zipPath, { lazyEntries: true }, (err, zip) => {
-      if (err || !zip) return reject(err);
-      const out: string[] = [];
-      zip.on('entry', (e: yauzl.Entry) => {
-        out.push(e.fileName);
-        zip.readEntry();
-      });
-      zip.on('end', () => resolve(out.sort()));
-      zip.readEntry();
-    });
-  });
-}
-
 describe('parsePackage', () => {
-  it('reads a package nested in a folder and repacks only the chart files at the root', async () => {
+  it('reads a package nested in a folder and keeps only the chart files', async () => {
     const zip = await makeZip({
       '夢の降る日に_l9x2/manifest.json': JSON.stringify(MANIFEST),
       '夢の降る日に_l9x2/score.json': '{"notes":[]}',
@@ -80,7 +64,8 @@ describe('parsePackage', () => {
     expect(parsed.manifest.previewStartTimeSec).toBe(42.5);
     expect(parsed.audio.extension).toBe('ogg');
     expect(parsed.jacket?.contentType).toBe('image/png');
-    expect(await names(parsed.packagePath)).toEqual(['audio.ogg', 'jacket.png', 'manifest.json', 'score.json']);
+    expect([parsed.score.name, parsed.audio.name, parsed.jacket?.name, parsed.video]).toEqual(['score.json', 'audio.ogg', 'jacket.png', null]);
+    expect(await readFile(parsed.score.path, 'utf8')).toBe('{"notes":[]}');
   });
 
   it('falls back to score.sus and audio.* like the game, and drops a missing jacket', async () => {
@@ -95,7 +80,7 @@ describe('parsePackage', () => {
     expect(parsed.manifest.audioFileName).toBe('audio.ogg');
     expect(parsed.jacket).toBeNull();
     expect(parsed.manifest.jacketFileName).toBe('');
-    const written = JSON.parse(await readFile(path.join(path.dirname(parsed.packagePath), 'manifest.original.json'), 'utf8'));
+    const written = JSON.parse(await readFile(path.join(path.dirname(path.dirname(parsed.score.path)), 'manifest.original.json'), 'utf8'));
     expect(written.scoreFileName).toBe('missing.json');
   });
 
