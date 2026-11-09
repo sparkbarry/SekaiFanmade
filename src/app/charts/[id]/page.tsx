@@ -3,10 +3,10 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { Jacket } from '@/components/chart-card';
 import { Comments } from '@/components/comments';
-import { LikeButton } from '@/components/like-button';
 import { PreviewPlayer } from '@/components/preview-player';
 import { Avatar, ButtonLink, buttonClass, Card, DIFFICULTY_COLOR, DifficultyBadge, formatBytes, formatDate } from '@/components/ui';
-import { getChart, hasLiked, listComments } from '@/lib/charts';
+import { getChart } from '@/lib/charts';
+import { VoteControl } from '@/components/vote-control';
 import { getViewer } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +26,7 @@ export default async function ChartPage({ params }: { params: Params }) {
   if (ref !== chart.id) redirect(`/charts/${chart.id}`);
   const id = chart.id;
   const viewer = await getViewer();
-  const [comments, liked] = await Promise.all([listComments(id), viewer ? hasLiked(id, viewer.id) : false]);
+  const myVote = viewer ? ((await getChart(id, viewer.id))?.myVote ?? 0) : 0;
   const canEdit = !!viewer && (viewer.id === chart.uploader.id || viewer.isAdmin);
 
   const credits: [string, string][] = (
@@ -107,7 +107,7 @@ export default async function ChartPage({ params }: { params: Params }) {
                 ↓ 下载 ZIP
               </a>
               <PreviewPlayer src={chart.audioUrl} start={chart.previewStartSec} />
-              <LikeButton chartId={chart.id} liked={liked} count={chart.likeCount} signedIn={!!viewer} />
+              <VoteControl kind="chart" id={chart.id} score={chart.score} myVote={myVote} signedIn={!!viewer} loginNext={`/charts/${chart.id}`} />
               {canEdit && (
                 <ButtonLink variant="outline" href={`/charts/${chart.id}/edit`}>
                   管理
@@ -131,7 +131,7 @@ export default async function ChartPage({ params }: { params: Params }) {
         在 OpenSekai 的自制谱管理里点「新建谱面」→「导入 ZIP / 文件夹」，选择下载的 ZIP 即可游玩。
       </section>
 
-      <Comments chartId={chart.id} comments={comments} viewerId={viewer?.id ?? null} canModerate={canEdit} />
+      <Comments chartId={chart.id} viewer={viewer ? { id: viewer.id, isAdmin: viewer.isAdmin } : null} initialCount={chart.commentCount} />
     </div>
   );
 }

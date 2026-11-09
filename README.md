@@ -1,6 +1,6 @@
 # Sekai Fanmade
 
-OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上传、浏览、试听、下载 OpenSekai 自制谱，喜欢和评论。登录用 OurTaiko SSO。
+OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上传、浏览、试听、下载 OpenSekai 自制谱，Reddit 式的赞踩和楼中楼评论。登录用 OurTaiko SSO。
 
 参照 OurTaiko Fanmade 的做法：前后端在一个 Next.js 程序里，一个 Docker 镜像发布到 `ourtaiko-prod`；数据库是共享实例 `ourtaiko-postgres` 里单独的 `sekai_fanmade` 库；文件放在 `ourtaiko-public` 桶的 `sekai-fanmade/` 前缀下，经 CloudFront（`https://distrib.ourtaiko.org/sekai-fanmade/…`）公开读取。
 
@@ -23,7 +23,8 @@ OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上�
 | 位置 | 内容 |
 | --- | --- |
 | `src/lib/package.ts` | ZIP 校验与重新打包（有单元测试） |
-| `src/lib/charts.ts` | 谱面、喜欢、评论、下载计数 |
+| `src/lib/charts.ts` | 谱面、列表排序、收藏、下载与游玩计数 |
+| `src/lib/votes.ts`、`comments.ts`、`comment-folding.ts` | 赞踩、评论、karma、回复折叠（有单元测试） |
 | `src/lib/session.ts`、`oidc.ts`、`crypto.ts` | SSO 登录与会话 |
 | `src/lib/storage.ts` | S3 与本地开发存储 |
 | `src/lib/file-store.ts`、`jobs.ts`、`src/instrumentation.ts` | 内容寻址文件、后台重试删除 |
@@ -42,14 +43,36 @@ OIDC 授权码 + S256 PKCE，confidential client（HTTP Basic），scope `openid
 - 写操作：server actions 由 Next.js 检查 Origin；`PUT /api/v1/uploads` 和 `POST /auth/logout` 自己检查 `Origin` 等于 `APP_ORIGIN`。
 - 管理员：`ADMIN_USER_IDS` 里的 SSO 用户 ID，可以管理所有谱面和评论。
 
-## 公开接口
+## 赞踩与评论
 
-供 OpenSekai 以后在游戏里浏览下载用，不需要登录：
+照 OurTaiko Fanmade 的 Reddit 式做法：
 
-- `GET /api/v1/charts?q=&difficulty=&sort=new|updated|popular|downloads&page=&uploader=` → `{ items, total, page, pages }`
-- `GET /api/v1/charts/<id 或 numberId>` → 单个谱面（含 `id`、`numberId`、`packageUrl`、`audioUrl`、`jacketUrl`）
-- `GET /charts/<id 或 numberId>/download` → 计一次下载，302 到 CDN 上的 ZIP
-- `GET /readyz`
+- 谱面和评论都能赞（+1）或踩（−1），再点一次撤销。得分 = 赞 − 踩。发表评论时作者自动赞一次，所以新评论 1 分。
+- 谱面排序：热门（`hot`）是 Reddit 的 hot，`sign(s)·log10(max(|s|,1)) + 发布秒数/45000`，得分多 10 倍相当于新 12.5 小时；得分最高（`top`）就是得分。`popular`、`recommended` 是 `hot` 的别名（游戏的「人気」「おすすめ」）。
+- 评论排序：最佳（`best`，赞踩的 Wilson 下界，80% 置信度）、最高、最新、最早、争议（`(赞+踩)^(少/多)`）。回复按根评论成组取出，前端用 `planReplies` 折叠深楼和长楼；得分 ≤ −5 的评论默认收起。
+- 评论可编辑、删除。有回复的评论删除后留一个「已删除」占位，最后一条回复删掉时占位一起清除；管理员删除显示为「已移除」。每人每分钟最多 8 条评论，正文最多 10000 字，最多 1000 层。
+- 用户页显示 karma：别人对此人谱面和评论的赞减踩（自己的票不算）。
+
+## 接口
+
+`/api/v1/*`，网站和游戏共用。读取不需要登录；写入用网站 Cookie（检查 `Origin`）或游戏会话（`Authorization: Bearer`，向 SSO introspect）。
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/v1/meta` | 站点信息与游戏会话要用的 service |
+| `GET /api/v1/charts?q=&tag=&difficulty=&sort=&seed=&page=` | `sort`：`hot`、`new`、`top`、`comments`、`daily`、`plays`、`downloads`、`updated`、`hard`、`random`（配 `seed`）及别名 → `{ items, total, page, pages }` |
+| `GET /api/v1/charts/<id 或 numberId>` | 单个谱面（`score`、`upvotes`、`downvotes`，登录时还有 `myVote`、`bookmarked`） |
+| `PUT /api/v1/charts/<id>/vote` | `{ value: 1 \| 0 \| -1 }` → `{ score, upvotes, downvotes, myVote }` |
+| `PUT`／`DELETE /api/v1/charts/<id>/bookmark` | 收藏（游戏的マイリスト） |
+| `POST /api/v1/charts/<id>/plays` | 报一次游玩（同一人每小时一次） |
+| `GET /api/v1/charts/<id>/comments?sort=&page=` | 顶层评论（每页 20）连同它们的回复 |
+| `POST /api/v1/charts/<id>/comments` | `{ body, parentId? }` |
+| `GET`／`PATCH`／`DELETE /api/v1/comments/<id>` | 单条评论及其回复；编辑 `{ body }`；删除 |
+| `PUT /api/v1/comments/<id>/vote` | `{ value }` → `{ score, myVote }` |
+| `GET /api/v1/me`、`/api/v1/me/bookmarks`、`/api/v1/tags` | 当前用户、收藏列表、标签 |
+| `PUT /api/v1/uploads` | 上传谱面包（网站用） |
+| `GET /charts/<id 或 numberId>/download` | 计一次下载，302 到 CDN 上的 ZIP |
+| `GET /readyz` | 健康检查 |
 
 ## 本地开发
 

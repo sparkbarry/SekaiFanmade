@@ -10,6 +10,7 @@ import {
   pgTable,
   primaryKey,
   real,
+  smallint,
   text,
   timestamp,
 } from 'drizzle-orm/pg-core';
@@ -109,7 +110,9 @@ export const charts = pgTable(
     downloadCount: integer().notNull().default(0),
     /** Plays reported by the game (POST /api/v1/charts/<id>/plays), at most one per player per hour. */
     playCount: integer().notNull().default(0),
-    likeCount: integer().notNull().default(0),
+    /** Reddit-style votes; score = upvotes - downvotes. Kept in step with chart_votes by lib/votes.ts. */
+    upvotes: integer().notNull().default(0),
+    downvotes: integer().notNull().default(0),
     commentCount: integer().notNull().default(0),
     createdAt: now(),
     updatedAt: now(),
@@ -126,12 +129,14 @@ export const charts = pgTable(
     check('charts_difficulty_check', sql`${t.difficulty} in ('easy','normal','hard','expert','master','append')`),
     check('charts_level_check', sql`${t.playLevel} between 0 and 99`),
     check('charts_tags_check', sql`cardinality(${t.tags}) <= 8`),
+    check('charts_votes_check', sql`${t.upvotes} >= 0 and ${t.downvotes} >= 0`),
     index('charts_tags_idx').using('gin', t.tags),
   ],
 );
 
-export const chartLikes = pgTable(
-  'chart_likes',
+/** One vote per user and chart, as on Reddit: 1 or -1; withdrawing deletes the row. */
+export const chartVotes = pgTable(
+  'chart_votes',
   {
     chartId: text()
       .notNull()
@@ -139,11 +144,21 @@ export const chartLikes = pgTable(
     userId: text()
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    value: smallint().notNull(),
     createdAt: now(),
   },
-  (t) => [primaryKey({ columns: [t.chartId, t.userId] }), index('chart_likes_user_idx').on(t.userId)],
+  (t) => [
+    primaryKey({ columns: [t.chartId, t.userId] }),
+    index('chart_votes_user_idx').on(t.userId),
+    check('chart_votes_value_check', sql`${t.value} in (-1, 1)`),
+  ],
 );
 
+/**
+ * Threaded comments, as on Fanmade: replies point at their parent, root_id is the top-level ancestor.
+ * A deleted (by its author) or removed (by an admin) comment with replies stays as an empty placeholder;
+ * without replies the row goes.
+ */
 export const comments = pgTable(
   'comments',
   {
@@ -151,16 +166,49 @@ export const comments = pgTable(
     chartId: text()
       .notNull()
       .references(() => charts.id, { onDelete: 'cascade' }),
+    parentId: bigint({ mode: 'number' }).references((): AnyPgColumn => comments.id, { onDelete: 'cascade' }),
+    rootId: bigint({ mode: 'number' }),
+    depth: integer().notNull().default(0),
     userId: text()
       .notNull()
       .references(() => users.id),
-    body: text().notNull(),
+    body: text(),
+    upvotes: integer().notNull().default(0),
+    downvotes: integer().notNull().default(0),
+    replyCount: integer().notNull().default(0),
     createdAt: now(),
+    editedAt: timestamp({ withTimezone: true }),
     deletedAt: timestamp({ withTimezone: true }),
+    removedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     index('comments_chart_idx').on(t.chartId, t.createdAt),
-    check('comments_body_check', sql`char_length(${t.body}) between 1 and 1000`),
+    index('comments_root_idx').on(t.rootId),
+    index('comments_user_idx').on(t.userId, t.createdAt),
+    check(
+      'comments_body_check',
+      sql`(${t.deletedAt} is null and ${t.removedAt} is null and char_length(${t.body}) between 1 and 10000) or ((${t.deletedAt} is not null or ${t.removedAt} is not null) and ${t.body} is null)`,
+    ),
+    check('comments_depth_check', sql`${t.depth} between 0 and 1000`),
+    check('comments_votes_check', sql`${t.upvotes} >= 0 and ${t.downvotes} >= 0 and ${t.replyCount} >= 0`),
+  ],
+);
+
+export const commentVotes = pgTable(
+  'comment_votes',
+  {
+    commentId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => comments.id, { onDelete: 'cascade' }),
+    userId: text()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    value: smallint().notNull(),
+    createdAt: now(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.commentId, t.userId] }),
+    check('comment_votes_value_check', sql`${t.value} in (-1, 1)`),
   ],
 );
 

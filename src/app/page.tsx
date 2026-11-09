@@ -7,8 +7,8 @@ import { DIFFICULTIES, type Difficulty } from '@/lib/db/schema';
 
 export const dynamic = 'force-dynamic';
 
-const SORT_LABEL: Partial<Record<Sort, string>> = { new: '最新', recommended: '推荐', daily: '今日热门', popular: '最受欢迎', plays: '游玩最多' };
-const SHOWN_SORTS = ['new', 'recommended', 'daily', 'popular', 'plays'] as const;
+const SORT_LABEL: Partial<Record<Sort, string>> = { hot: '热门', new: '最新', top: '得分最高', comments: '评论最多', daily: '今日游玩' };
+const SHOWN_SORTS = ['hot', 'new', 'top', 'comments', 'daily'] as const;
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
@@ -22,7 +22,7 @@ export default async function Home({ searchParams }: { searchParams: Search }) {
   const d = one(sp.d);
   const difficulty = (DIFFICULTIES as readonly string[]).includes(d ?? '') ? (d as Difficulty) : undefined;
   const s = one(sp.sort);
-  const sort: Sort = (SORTS as readonly string[]).includes(s ?? '') ? (s as Sort) : 'new';
+  const sort: Sort = (SORTS as readonly string[]).includes(s ?? '') ? (s as Sort) : 'hot';
   const page = Math.max(1, Number(one(sp.page)) || 1);
   const tag = one(sp.tag)?.trim() || undefined;
   const result = await listCharts({ q, difficulty, sort, page, tag });
@@ -34,7 +34,7 @@ export default async function Home({ searchParams }: { searchParams: Search }) {
     const dd = over.d === undefined ? difficulty : over.d;
     if (dd) p.set('d', dd);
     const ss = over.sort ?? sort;
-    if (ss !== 'new') p.set('sort', ss);
+    if (ss !== 'hot') p.set('sort', ss);
     if (over.page && over.page > 1) p.set('page', String(over.page));
     const str = p.toString();
     return str ? `/?${str}` : '/';
@@ -50,7 +50,7 @@ export default async function Home({ searchParams }: { searchParams: Search }) {
           </h1>
           <form action="/" className="flex gap-2">
             {difficulty && <input type="hidden" name="d" value={difficulty} />}
-            {sort !== 'new' && <input type="hidden" name="sort" value={sort} />}
+            {sort !== 'hot' && <input type="hidden" name="sort" value={sort} />}
             <input
               type="search"
               name="q"

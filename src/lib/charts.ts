@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { sha256Hex } from '@/lib/crypto';
-import { bookmarks, chartLikes, chartPlays, charts, comments, db, DIFFICULTIES, files, users, type Difficulty } from '@/lib/db';
+import { bookmarks, chartPlays, charts, chartVotes, db, DIFFICULTIES, files, users, type Difficulty } from '@/lib/db';
 import { env } from '@/lib/env';
 import { inFileTransaction, releaseFiles, storeFile, type StoredFile } from '@/lib/file-store';
 import { PackageError, parsePackage, type ParsedPackage } from '@/lib/package';
@@ -15,8 +15,12 @@ import { Forbidden, type Viewer } from '@/lib/session';
 import { storage } from '@/lib/storage';
 
 export const PAGE_SIZE = 24;
-/** recommended: likes and plays weighted by age; daily: plays in the last 24 hours; plays: all-time plays; hard: highest level first. */
-export const SORTS = ['new', 'popular', 'downloads', 'updated', 'recommended', 'daily', 'plays', 'hard', 'random'] as const;
+/**
+ * hot: Reddit's hot ranking, as on OurTaiko Fanmade (popular and recommended are the same);
+ * top: score (upvotes - downvotes); comments: comment count; daily: plays in the last 24 hours;
+ * plays: all-time plays; hard: highest level first.
+ */
+export const SORTS = ['new', 'hot', 'top', 'comments', 'popular', 'recommended', 'downloads', 'updated', 'daily', 'plays', 'hard', 'random'] as const;
 export type Sort = (typeof SORTS)[number];
 
 export class NotFound extends Error {}
@@ -70,7 +74,8 @@ const chartColumns = {
   jacketStorageKey: jacketFile.storageKey,
   downloadCount: charts.downloadCount,
   playCount: charts.playCount,
-  likeCount: charts.likeCount,
+  upvotes: charts.upvotes,
+  downvotes: charts.downvotes,
   tags: charts.tags,
   allowDerivative: charts.allowDerivative,
   parentChartId: charts.parentChartId,
@@ -106,15 +111,18 @@ export interface ChartSummary {
   packageUrl: string;
   downloadCount: number;
   playCount: number;
-  likeCount: number;
+  /** upvotes - downvotes */
+  score: number;
+  upvotes: number;
+  downvotes: number;
   commentCount: number;
   tags: string[];
   /** 二次利用OK */
   allowDerivative: boolean;
   /** 親譜面 (its id), if this chart is derived from another one. */
   parentChartId: string | null;
-  /** Only present when the request is signed in. */
-  liked?: boolean;
+  /** Only present when the request is signed in: the viewer's vote (1, 0, -1) and マイリスト. */
+  myVote?: -1 | 0 | 1;
   bookmarked?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -151,7 +159,9 @@ function toSummary(r: ChartRow): ChartSummary {
     packageUrl: s.publicUrl(packageKey),
     downloadCount: r.downloadCount,
     playCount: r.playCount,
-    likeCount: r.likeCount,
+    score: r.upvotes - r.downvotes,
+    upvotes: r.upvotes,
+    downvotes: r.downvotes,
     commentCount: r.commentCount,
     tags: r.tags,
     allowDerivative: r.allowDerivative,
@@ -178,7 +188,8 @@ export interface ListQuery {
   sort?: Sort;
   page?: number;
   uploaderId?: string;
-  likedBy?: string;
+  /** Charts this user upvoted. */
+  upvotedBy?: string;
   bookmarkedBy?: string;
   /** Exact tag match. */
   tag?: string;
@@ -222,23 +233,28 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
       sql`exists (select 1 from ${bookmarks} where ${bookmarks.chartId} = ${charts.id} and ${bookmarks.userId} = ${query.bookmarkedBy})`,
     );
   }
-  if (query.likedBy) {
+  if (query.upvotedBy) {
     where.push(
-      sql`exists (select 1 from ${chartLikes} where ${chartLikes.chartId} = ${charts.id} and ${chartLikes.userId} = ${query.likedBy})`,
+      sql`exists (select 1 from ${chartVotes} where ${chartVotes.chartId} = ${charts.id} and ${chartVotes.userId} = ${query.upvotedBy} and ${chartVotes.value} = 1)`,
     );
   }
   const dailyPlays = sql`(select count(*) from ${chartPlays} where ${chartPlays.chartId} = ${charts.id} and ${chartPlays.createdAt} > now() - interval '1 day')`;
-  const hot = sql`((${charts.likeCount} * 4 + ${charts.playCount} + ${charts.downloadCount} + 2) / power(extract(epoch from now() - ${charts.createdAt}) / 3600 + 2, 1.2))`;
+  // Reddit's hot: sign(s)·log10(max(|s|, 1)) + seconds / 45000, so ten times the score counts as 12.5 hours newer.
+  const score = sql`(${charts.upvotes} - ${charts.downvotes})`;
+  const hot = sql`(sign(${score}) * log(greatest(abs(${score}), 1)) + extract(epoch from ${charts.createdAt}) / 45000)`;
   const seed = (query.seed ?? '').replace(/[^0-9a-z]/gi, '').slice(0, 16) || 'seed';
   const order = {
     new: [desc(charts.createdAt), desc(charts.numberId)],
     updated: [desc(charts.updatedAt), desc(charts.numberId)],
-    popular: [desc(charts.likeCount), desc(charts.playCount), desc(charts.numberId)],
-    downloads: [desc(charts.downloadCount), desc(charts.likeCount), desc(charts.numberId)],
-    recommended: [desc(hot), desc(charts.numberId)],
-    daily: [desc(dailyPlays), desc(charts.playCount), desc(charts.likeCount), desc(charts.numberId)],
-    plays: [desc(charts.playCount), desc(charts.likeCount), desc(charts.numberId)],
-    hard: [desc(charts.playLevel), desc(charts.likeCount), desc(charts.numberId)],
+    hot: [desc(hot), desc(charts.createdAt), desc(charts.numberId)],
+    popular: [desc(hot), desc(charts.createdAt), desc(charts.numberId)],
+    recommended: [desc(hot), desc(charts.createdAt), desc(charts.numberId)],
+    top: [desc(score), desc(charts.createdAt), desc(charts.numberId)],
+    comments: [desc(charts.commentCount), desc(charts.createdAt), desc(charts.numberId)],
+    downloads: [desc(charts.downloadCount), desc(score), desc(charts.numberId)],
+    daily: [desc(dailyPlays), desc(charts.playCount), desc(score), desc(charts.numberId)],
+    plays: [desc(charts.playCount), desc(score), desc(charts.numberId)],
+    hard: [desc(charts.playLevel), desc(score), desc(charts.numberId)],
     random: [sql`md5(${charts.id} || ${seed})`],
   }[query.sort ?? 'new'];
 
@@ -260,20 +276,20 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
 async function addViewerFlags(items: ChartSummary[], viewerId: string) {
   if (items.length === 0) return;
   const ids = items.map((c) => c.id);
-  const [liked, saved] = await Promise.all([
+  const [votes, saved] = await Promise.all([
     db()
-      .select({ id: chartLikes.chartId })
-      .from(chartLikes)
-      .where(and(eq(chartLikes.userId, viewerId), inArray(chartLikes.chartId, ids))),
+      .select({ id: chartVotes.chartId, value: chartVotes.value })
+      .from(chartVotes)
+      .where(and(eq(chartVotes.userId, viewerId), inArray(chartVotes.chartId, ids))),
     db()
       .select({ id: bookmarks.chartId })
       .from(bookmarks)
       .where(and(eq(bookmarks.userId, viewerId), inArray(bookmarks.chartId, ids))),
   ]);
-  const likedSet = new Set(liked.map((r) => r.id));
+  const voteOf = new Map(votes.map((r) => [r.id, r.value as -1 | 1]));
   const savedSet = new Set(saved.map((r) => r.id));
   for (const c of items) {
-    c.liked = likedSet.has(c.id);
+    c.myVote = voteOf.get(c.id) ?? 0;
     c.bookmarked = savedSet.has(c.id);
   }
 }
@@ -287,14 +303,6 @@ export async function getChart(ref: string, viewerId?: string): Promise<ChartSum
   const chart = toSummary(row);
   if (viewerId) await addViewerFlags([chart], viewerId);
   return chart;
-}
-
-export async function hasLiked(chartId: string, userId: string): Promise<boolean> {
-  const [row] = await db()
-    .select({ one: sql`1` })
-    .from(chartLikes)
-    .where(and(eq(chartLikes.chartId, chartId), eq(chartLikes.userId, userId)));
-  return !!row;
 }
 
 /* ---------- uploads ---------- */
@@ -505,27 +513,6 @@ async function liveChartId(ref: string): Promise<string | null> {
   return row?.id ?? null;
 }
 
-export async function setLike(viewer: Viewer, ref: string, liked: boolean): Promise<number> {
-  const chartId = await liveChartId(ref);
-  if (!chartId) throw new NotFound('谱面不存在。');
-  return db().transaction(async (tx) => {
-    const [chart] = await tx
-      .select({ id: charts.id })
-      .from(charts)
-      .where(and(eq(charts.id, chartId), isNull(charts.deletedAt)))
-      .for('update');
-    if (!chart) throw new NotFound('谱面不存在。');
-    if (liked) {
-      await tx.insert(chartLikes).values({ chartId, userId: viewer.id }).onConflictDoNothing();
-    } else {
-      await tx.delete(chartLikes).where(and(eq(chartLikes.chartId, chartId), eq(chartLikes.userId, viewer.id)));
-    }
-    const [{ n }] = await tx.select({ n: count() }).from(chartLikes).where(eq(chartLikes.chartId, chartId));
-    await tx.update(charts).set({ likeCount: n }).where(eq(charts.id, chartId));
-    return n;
-  });
-}
-
 /** Counts a play reported by the game: one per actor per chart per hour. Returns the new total. */
 export async function recordPlay(ref: string, actor: string): Promise<number | null> {
   const chartId = await liveChartId(ref);
@@ -587,77 +574,6 @@ export async function recordDownload(ref: string): Promise<string | null> {
     .where(eq(charts.id, chartId));
   const chart = await getChart(chartId);
   return chart?.packageUrl ?? null;
-}
-
-export interface CommentView {
-  id: number;
-  body: string;
-  createdAt: string;
-  user: { id: string; nickname: string; avatarUrl: string | null };
-}
-
-export async function listComments(chartId: string): Promise<CommentView[]> {
-  const rows = await db()
-    .select({
-      id: comments.id,
-      body: comments.body,
-      createdAt: comments.createdAt,
-      userId: users.id,
-      nickname: users.nickname,
-      avatarUrl: users.avatarUrl,
-    })
-    .from(comments)
-    .innerJoin(users, eq(users.id, comments.userId))
-    .where(and(eq(comments.chartId, chartId), isNull(comments.deletedAt)))
-    .orderBy(asc(comments.createdAt))
-    .limit(500);
-  return rows.map((r) => ({
-    id: r.id,
-    body: r.body,
-    createdAt: r.createdAt.toISOString(),
-    user: { id: r.userId, nickname: r.nickname, avatarUrl: r.avatarUrl },
-  }));
-}
-
-async function syncCommentCount(chartId: string) {
-  await db()
-    .update(charts)
-    .set({
-      commentCount: sql`(select count(*) from ${comments} where ${comments.chartId} = ${chartId} and ${comments.deletedAt} is null)`,
-    })
-    .where(eq(charts.id, chartId));
-}
-
-export async function addComment(viewer: Viewer, ref: string, body: string): Promise<void> {
-  const text = body.trim();
-  if (!text) throw new PackageError('评论不能为空。');
-  if (text.length > 1000) throw new PackageError('评论最多 1000 字。');
-  const chartId = await liveChartId(ref);
-  if (!chartId) throw new NotFound('谱面不存在。');
-  const since = new Date(Date.now() - 60_000);
-  const [{ n }] = await db()
-    .select({ n: count() })
-    .from(comments)
-    .where(and(eq(comments.userId, viewer.id), gte(comments.createdAt, since)));
-  if (n >= 5) throw new TooMany('评论太频繁，请稍后再试。');
-  await db().insert(comments).values({ chartId, userId: viewer.id, body: text });
-  await syncCommentCount(chartId);
-}
-
-/** Returns the chart's id. */
-export async function deleteComment(viewer: Viewer, commentId: number): Promise<string> {
-  const [row] = await db()
-    .select({ chartId: comments.chartId, userId: comments.userId, uploaderId: charts.uploaderId })
-    .from(comments)
-    .innerJoin(charts, eq(charts.id, comments.chartId))
-    .where(and(eq(comments.id, commentId), isNull(comments.deletedAt)));
-  if (!row) throw new NotFound('评论不存在。');
-  if (row.userId !== viewer.id && row.uploaderId !== viewer.id && !viewer.isAdmin) {
-    throw new Forbidden('不能删除别人的评论。');
-  }
-  await db().update(comments).set({ deletedAt: new Date() }).where(eq(comments.id, commentId));
-  await syncCommentCount(row.chartId);
-  return row.chartId;
 }
 
 export async function getUser(id: string) {
