@@ -151,3 +151,9 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 发布后：迁移 6 条；启动任务 `split chart 1 … released 7804caf1….zip`，`{ split: 1, failed: 0 }`。谱面 1 引用 score 4（`.json` 1417721）、audio 2（`.ogg`，原对象复用）、缩略图 5（重新编码，新对象）、原始封面 6（`.png` 340622），`package_size` 8905103；`retired_objects` 0，ZIP 的 S3 对象已删（CloudFront 边缘缓存仍可能返回它）。
 - 遗留：拆分时缩略图重新编码成了不同的字节，旧缩略图 3（`2b2d67b0….jpg`，19 KB）没有谱面引用但还在桶里。修复在 `bcd13fd`（拆分时一并释放旧音频和缩略图，后台任务释放一小时以上无人引用的文件），随 `bab8e4a` 发布：启动后 `released 1 file(s) no chart refers to`，文件 3 的行和 S3 对象已删，`retired_objects` 0；`/readyz`、谱面页 200。
 - 核对：谱面接口列出 3 个文件，经 CDN 都 200 且带 `Access-Control-Allow-Origin: *`；首页、谱面页、列表、`/readyz` 200，旧下载地址 302；网页「下载 ZIP」在浏览器里生成 `言って。 [MASTER 30].zip`（manifest、score 压缩，音频、封面存储），这次测试计了 1 次下载。
+
+### 2026-11-09 删除 ZIP 列（`79b41ef`，迁移 0006）
+
+- 内容：删除 `charts.package_file_id` 和拆分任务；`charts_files_check` 改为没删除的谱面必须有 `score_file_id`、`audio_file_id`、`manifest`。迁移开头检查仍有 ZIP 的谱面，有就报错回滚。
+- 发布前：`package_file_id` 非空的谱面 0，共 1 首，迁移 6 条。备份 `/var/backups/sekai-fanmade/pre-0006-20261109T071223Z.dump`（root 600，`pg_restore --list` 正常）。
+- 发布后：迁移 7 条，列已不在，新约束生效；`files` 4 行，`retired_objects` 0；日志无错误。首页、谱面页、上传页、列表、`/readyz` 200，谱面接口仍列出 score、audio、jacket 三个文件。

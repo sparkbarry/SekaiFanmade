@@ -17,7 +17,7 @@ OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上�
 - 谱面包不存 ZIP：`charts.manifest`（jsonb）是重写过的 manifest.json，`score_file_id`／`audio_file_id`／`jacket_source_file_id`／`video_file_id` 是它引用的文件，`jacket_file_id` 是缩略图，`package_size` 是这些加起来的大小。单个谱面的接口返回 `package: { manifest, files: [{ role, name, url, size, sha256 }] }`：把 manifest.json 和各文件按 `name` 写进一个文件夹就是谱面。游戏这样下载后导入；网站的「下载 ZIP」在浏览器里用 JSZip 打包；两者都 `POST /api/v1/charts/<id>/downloads` 计数。这样音频只存一份，服务器不打包也不转发文件。
 - `files` 表每个对象一行，谱面的各列引用它；内容相同的上传共用一行和一个对象（同一首歌的多张谱面共用音频）。
 - 替换或删除谱面后，`releaseFiles` 删掉不再被任何谱面引用的对象；存入和删除同一个键时用 `pg_advisory_xact_lock` 串行。事务失败时，本次上传的对象若没有 `files` 行就删掉（`discardUnreferenced`）。删不掉的记进 `retired_objects`，后台每 10 分钟重试（`src/lib/jobs.ts`）。
-- 迁移 0002 之前的谱面用的是 `charts/<number>/r<revision>/...`，由 `bb6954e` 的启动任务搬成哈希对象；迁移 0003 删掉了旧列，并加了 `charts_files_check`。迁移 0005 之前的谱面存的是重新打包的 ZIP（`package_file_id`），由启动任务 `src/lib/package-split.ts` 拆成各部分并删除 ZIP。
+- 迁移 0002 之前的谱面用的是 `charts/<number>/r<revision>/...`，由 `bb6954e` 的启动任务搬成哈希对象；迁移 0003 删掉了旧列，并加了 `charts_files_check`。迁移 0005 之前的谱面存的是重新打包的 ZIP，由 `b394da8` 的启动任务拆成各部分并删除 ZIP；迁移 0006 删掉了 `package_file_id`，`charts_files_check` 要求没删除的谱面有谱面文件、音频和 manifest。
 
 ## 代码结构
 
