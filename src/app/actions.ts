@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { addComment, deleteChart, deleteComment, setLike, updateChartInfo } from '@/lib/charts';
+import { addComment, deleteChart, deleteComment, parseChartRef, setLike, updateChartInfo } from '@/lib/charts';
 import { errorStatus } from '@/lib/http';
 import { PackageError } from '@/lib/package';
 import { requireViewer } from '@/lib/session';
@@ -22,12 +22,12 @@ async function run(fn: () => Promise<void>): Promise<ActionState> {
 }
 
 function chartId(form: FormData) {
-  const id = Number(form.get('chartId'));
-  if (!Number.isSafeInteger(id) || id <= 0) throw new Error('bad chart id');
+  const id = String(form.get('chartId') ?? '');
+  if (!/^[0-9a-f]{32}$/.test(id)) throw new Error('bad chart id');
   return id;
 }
 
-export async function toggleLikeAction(chartIdValue: number, liked: boolean): Promise<ActionState & { count?: number }> {
+export async function toggleLikeAction(chartIdValue: string, liked: boolean): Promise<ActionState & { count?: number }> {
   try {
     const viewer = await requireViewer();
     const count = await setLike(viewer, chartIdValue, liked);
@@ -59,14 +59,13 @@ export async function saveChartInfoAction(_prev: ActionState, form: FormData): P
   return run(async () => {
     const viewer = await requireViewer();
     const id = chartId(form);
-    const parentRaw = String(form.get('parentChartId') ?? '').replace('#', '').trim();
-    const parent = parentRaw ? Number(parentRaw) : null;
-    if (parent !== null && (!Number.isSafeInteger(parent) || parent <= 0)) throw new PackageError('親譜面要填谱面编号。');
+    const parentRaw = String(form.get('parentChart') ?? '').trim();
+    if (parentRaw && !parseChartRef(parentRaw)) throw new PackageError('親譜面要填谱面编号。');
     await updateChartInfo(viewer, id, {
       description: String(form.get('description') ?? ''),
       tags: String(form.get('tags') ?? '').split(/[,，、\n]/),
       allowDerivative: form.get('allowDerivative') === 'on',
-      parentChartId: parent,
+      parentChart: parentRaw || null,
     });
     revalidatePath(`/charts/${id}`);
   });

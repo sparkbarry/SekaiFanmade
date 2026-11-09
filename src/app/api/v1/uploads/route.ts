@@ -42,8 +42,8 @@ export async function PUT(request: Request) {
 
     const chartParam = new URL(request.url).searchParams.get('chart');
     if (chartParam) {
-      const id = Number(chartParam);
-      if (!Number.isSafeInteger(id) || id <= 0) throw new BadRequest('谱面编号不正确。');
+      const id = chartParam.trim().toLowerCase();
+      if (!/^[0-9a-f]{32}$/.test(id)) throw new BadRequest('谱面 ID 不正确。');
       await replaceChart(viewer, id, file);
       return NextResponse.json({ id });
     }

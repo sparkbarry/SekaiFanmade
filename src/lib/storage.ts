@@ -1,6 +1,8 @@
 import 'server-only';
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { createReadStream } from 'node:fs';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { env } from '@/lib/env';
@@ -15,10 +17,12 @@ export interface Storage {
   /** Uploads a local file or buffer. Keys are relative to the site's prefix. */
   put(key: string, body: Buffer | { file: string }, options: PutOptions): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Copies an object to a local file. */
+  download(key: string, file: string): Promise<void>;
   publicUrl(key: string): string;
 }
 
-/** Every key carries a revision, so objects never change and can be cached for a year. */
+/** Keys are content hashes, so an object never changes and can be cached for a year. */
 const CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 export function contentDisposition(name: string): string {
@@ -69,6 +73,12 @@ class S3Storage implements Storage {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.full(key) }));
   }
 
+  async download(key: string, file: string) {
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.full(key) }));
+    if (!res.Body) throw new Error(`empty object ${key}`);
+    await pipeline(res.Body as Readable, createWriteStream(file));
+  }
+
   publicUrl(key: string) {
     assertKey(key);
     return `${this.baseUrl.replace(/\/+$/, '')}/${key}`;
@@ -100,6 +110,11 @@ class LocalStorage implements Storage {
     const target = this.resolve(key);
     await rm(target, { force: true });
     await rm(`${target}.meta.json`, { force: true });
+  }
+
+  async download(key: string, file: string) {
+    const { copyFile } = await import('node:fs/promises');
+    await copyFile(this.resolve(key), file);
   }
 
   publicUrl(key: string) {

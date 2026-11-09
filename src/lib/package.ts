@@ -358,7 +358,9 @@ async function writePackage(
   files: { name: string; path: string; compress: boolean }[],
 ): Promise<void> {
   const out = new yazl.ZipFile();
-  const mtime = new Date();
+  // A fixed timestamp makes the ZIP depend only on its contents, so the same package stored twice
+  // gets the same hash and shares one object.
+  const mtime = new Date(Date.UTC(2020, 0, 1));
   out.addBuffer(Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'), 'manifest.json', { mtime });
   for (const f of files) out.addFile(f.path, f.name, { compress: f.compress, mtime });
   out.end();

@@ -1,13 +1,15 @@
 import 'server-only';
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { sha256File } from '@/lib/files';
 import { sha256Hex } from '@/lib/crypto';
-import { bookmarks, chartLikes, chartPlays, charts, comments, db, DIFFICULTIES, retiredObjects, users, type Difficulty } from '@/lib/db';
+import { bookmarks, chartLikes, chartPlays, charts, comments, db, DIFFICULTIES, files, users, type Difficulty } from '@/lib/db';
 import { env } from '@/lib/env';
+import { inFileTransaction, releaseFiles, storeFile, type StoredFile } from '@/lib/file-store';
 import { PackageError, parsePackage, type ParsedPackage } from '@/lib/package';
 import { Forbidden, type Viewer } from '@/lib/session';
 import { storage } from '@/lib/storage';
@@ -21,8 +23,34 @@ export class NotFound extends Error {}
 export class Conflict extends Error {}
 export class TooMany extends Error {}
 
+const CHART_ID = /^[0-9a-f]{32}$/;
+
+export function newChartId(): string {
+  return randomBytes(16).toString('hex');
+}
+
+/** A chart reference from a URL or form: the 32-hex id, or the number (optionally written #12). */
+export function parseChartRef(raw: string | null | undefined): { id: string } | { numberId: number } | null {
+  const value = (raw ?? '').trim().replace(/^#/, '').toLowerCase();
+  if (CHART_ID.test(value)) return { id: value };
+  if (/^[1-9]\d{0,15}$/.test(value)) {
+    const n = Number(value);
+    if (Number.isSafeInteger(n)) return { numberId: n };
+  }
+  return null;
+}
+
+function refCondition(ref: { id: string } | { numberId: number }): SQL {
+  return 'id' in ref ? eq(charts.id, ref.id) : eq(charts.numberId, ref.numberId);
+}
+
+const packageFile = alias(files, 'package_file');
+const audioFile = alias(files, 'audio_file');
+const jacketFile = alias(files, 'jacket_file');
+
 const chartColumns = {
   id: charts.id,
+  numberId: charts.numberId,
   title: charts.title,
   scoreTitle: charts.scoreTitle,
   composer: charts.composer,
@@ -36,10 +64,14 @@ const chartColumns = {
   previewStartSec: charts.previewStartSec,
   hasVideo: charts.hasVideo,
   revision: charts.revision,
-  packageKey: charts.packageKey,
-  packageSize: charts.packageSize,
-  jacketKey: charts.jacketKey,
-  audioKey: charts.audioKey,
+  packageStorageKey: packageFile.storageKey,
+  packageByteSize: packageFile.byteSize,
+  audioStorageKey: audioFile.storageKey,
+  jacketStorageKey: jacketFile.storageKey,
+  legacyPackageKey: charts.packageKey,
+  legacyPackageSize: charts.packageSize,
+  legacyAudioKey: charts.audioKey,
+  legacyJacketKey: charts.jacketKey,
   downloadCount: charts.downloadCount,
   playCount: charts.playCount,
   likeCount: charts.likeCount,
@@ -55,7 +87,10 @@ const chartColumns = {
 };
 
 export interface ChartSummary {
-  id: number;
+  /** 32 random hex digits. */
+  id: string;
+  /** Short public number (譜面ID検索, #12). */
+  numberId: number;
   title: string;
   scoreTitle: string;
   composer: string;
@@ -80,8 +115,8 @@ export interface ChartSummary {
   tags: string[];
   /** 二次利用OK */
   allowDerivative: boolean;
-  /** 親譜面, if this chart is derived from another one. */
-  parentChartId: number | null;
+  /** 親譜面 (its id), if this chart is derived from another one. */
+  parentChartId: string | null;
   /** Only present when the request is signed in. */
   liked?: boolean;
   bookmarked?: boolean;
@@ -94,8 +129,13 @@ type ChartRow = Awaited<ReturnType<typeof selectCharts>>[number];
 
 function toSummary(r: ChartRow): ChartSummary {
   const s = storage();
+  // Charts not yet moved to content-addressed files still have their legacy keys.
+  const packageKey = r.packageStorageKey ?? r.legacyPackageKey ?? '';
+  const audioKey = r.audioStorageKey ?? r.legacyAudioKey ?? '';
+  const jacketKey = r.jacketStorageKey ?? r.legacyJacketKey;
   return {
     id: r.id,
+    numberId: r.numberId,
     title: r.title,
     scoreTitle: r.scoreTitle,
     composer: r.composer,
@@ -109,10 +149,10 @@ function toSummary(r: ChartRow): ChartSummary {
     previewStartSec: r.previewStartSec,
     hasVideo: r.hasVideo,
     revision: r.revision,
-    packageSize: r.packageSize,
-    jacketUrl: r.jacketKey ? s.publicUrl(r.jacketKey) : null,
-    audioUrl: s.publicUrl(r.audioKey),
-    packageUrl: s.publicUrl(r.packageKey),
+    packageSize: r.packageByteSize ?? r.legacyPackageSize ?? 0,
+    jacketUrl: jacketKey ? s.publicUrl(jacketKey) : null,
+    audioUrl: s.publicUrl(audioKey),
+    packageUrl: s.publicUrl(packageKey),
     downloadCount: r.downloadCount,
     playCount: r.playCount,
     likeCount: r.likeCount,
@@ -127,7 +167,13 @@ function toSummary(r: ChartRow): ChartSummary {
 }
 
 function selectCharts() {
-  return db().select(chartColumns).from(charts).innerJoin(users, eq(users.id, charts.uploaderId));
+  return db()
+    .select(chartColumns)
+    .from(charts)
+    .innerJoin(users, eq(users.id, charts.uploaderId))
+    .leftJoin(packageFile, eq(packageFile.id, charts.packageFileId))
+    .leftJoin(audioFile, eq(audioFile.id, charts.audioFileId))
+    .leftJoin(jacketFile, eq(jacketFile.id, charts.jacketFileId));
 }
 
 export interface ListQuery {
@@ -155,7 +201,7 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
   const q = query.q?.trim().slice(0, 100);
   if (q) {
     const like = `%${escapeLike(q)}%`;
-    const asId = /^#?\d+$/.test(q) ? Number(q.replace('#', '')) : null;
+    const ref = /^#?[0-9a-f]+$/i.test(q) ? parseChartRef(q) : null;
     where.push(
       or(
         ilike(charts.title, like),
@@ -165,7 +211,7 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
         ilike(charts.arranger, like),
         ilike(charts.lyricist, like),
         ilike(users.nickname, like),
-        ...(asId !== null && Number.isSafeInteger(asId) ? [eq(charts.id, asId)] : []),
+        ...(ref ? [refCondition(ref)] : []),
       )!,
     );
   }
@@ -189,15 +235,15 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
   const hot = sql`((${charts.likeCount} * 4 + ${charts.playCount} + ${charts.downloadCount} + 2) / power(extract(epoch from now() - ${charts.createdAt}) / 3600 + 2, 1.2))`;
   const seed = (query.seed ?? '').replace(/[^0-9a-z]/gi, '').slice(0, 16) || 'seed';
   const order = {
-    new: [desc(charts.createdAt), desc(charts.id)],
-    updated: [desc(charts.updatedAt), desc(charts.id)],
-    popular: [desc(charts.likeCount), desc(charts.playCount), desc(charts.id)],
-    downloads: [desc(charts.downloadCount), desc(charts.likeCount), desc(charts.id)],
-    recommended: [desc(hot), desc(charts.id)],
-    daily: [desc(dailyPlays), desc(charts.playCount), desc(charts.likeCount), desc(charts.id)],
-    plays: [desc(charts.playCount), desc(charts.likeCount), desc(charts.id)],
-    hard: [desc(charts.playLevel), desc(charts.likeCount), desc(charts.id)],
-    random: [sql`md5(${charts.id}::text || ${seed})`],
+    new: [desc(charts.createdAt), desc(charts.numberId)],
+    updated: [desc(charts.updatedAt), desc(charts.numberId)],
+    popular: [desc(charts.likeCount), desc(charts.playCount), desc(charts.numberId)],
+    downloads: [desc(charts.downloadCount), desc(charts.likeCount), desc(charts.numberId)],
+    recommended: [desc(hot), desc(charts.numberId)],
+    daily: [desc(dailyPlays), desc(charts.playCount), desc(charts.likeCount), desc(charts.numberId)],
+    plays: [desc(charts.playCount), desc(charts.likeCount), desc(charts.numberId)],
+    hard: [desc(charts.playLevel), desc(charts.likeCount), desc(charts.numberId)],
+    random: [sql`md5(${charts.id} || ${seed})`],
   }[query.sort ?? 'new'];
 
   const page = Math.max(1, Math.trunc(query.page ?? 1));
@@ -236,16 +282,18 @@ async function addViewerFlags(items: ChartSummary[], viewerId: string) {
   }
 }
 
-export async function getChart(id: number, viewerId?: string): Promise<ChartSummary | null> {
-  if (!Number.isSafeInteger(id) || id <= 0) return null;
-  const [row] = await selectCharts().where(and(eq(charts.id, id), isNull(charts.deletedAt)));
+/** By 32-hex id or by number. */
+export async function getChart(ref: string, viewerId?: string): Promise<ChartSummary | null> {
+  const parsed = parseChartRef(ref);
+  if (!parsed) return null;
+  const [row] = await selectCharts().where(and(refCondition(parsed), isNull(charts.deletedAt)));
   if (!row) return null;
   const chart = toSummary(row);
   if (viewerId) await addViewerFlags([chart], viewerId);
   return chart;
 }
 
-export async function hasLiked(chartId: number, userId: string): Promise<boolean> {
+export async function hasLiked(chartId: string, userId: string): Promise<boolean> {
   const [row] = await db()
     .select({ one: sql`1` })
     .from(chartLikes)
@@ -269,72 +317,51 @@ async function withWorkDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
-interface StoredObjects {
-  packageKey: string;
-  packageSize: number;
-  packageSha256: string;
-  jacketKey: string | null;
-  audioKey: string;
-}
-
-async function storeObjects(chartId: number, revision: number, parsed: ParsedPackage, workDir: string): Promise<StoredObjects> {
-  const s = storage();
-  const prefix = `charts/${chartId}/r${revision}`;
-  const put: string[] = [];
-  try {
-    const { manifest } = parsed;
-    const pkg = await sha256File(parsed.packagePath);
-    const packageKey = `${prefix}/package.zip`;
-    await s.put(packageKey, { file: parsed.packagePath }, {
-      contentType: 'application/zip',
-      downloadName: downloadName({
-        scoreTitle: manifest.scoreTitle,
-        difficulty: manifest.musicDifficultyType,
-        playLevel: manifest.playLevel,
-      }),
-    });
-    put.push(packageKey);
-
-    const audioKey = `${prefix}/audio.${parsed.audio.extension}`;
-    await s.put(audioKey, { file: parsed.audio.path }, { contentType: parsed.audio.contentType });
-    put.push(audioKey);
-
-    let jacketKey: string | null = null;
-    if (parsed.jacket) {
-      // JPEG rather than WebP: the game decodes jackets with Texture2D.LoadImage (PNG / JPEG only).
-      const jpeg = path.join(workDir, 'jacket.jpg');
-      try {
-        await sharp(parsed.jacket.path, { limitInputPixels: 64_000_000 })
-          .rotate()
-          .resize(512, 512, { fit: 'cover' })
-          .flatten({ background: '#ffffff' })
-          .jpeg({ quality: 88, mozjpeg: true })
-          .toFile(jpeg);
-      } catch {
-        throw new PackageError(`${parsed.jacket.name} 无法解码。`);
-      }
-      jacketKey = `${prefix}/jacket.jpg`;
-      await s.put(jacketKey, { file: jpeg }, { contentType: 'image/jpeg' });
-      put.push(jacketKey);
-    }
-    return { packageKey, packageSize: pkg.size, packageSha256: pkg.sha256, jacketKey, audioKey };
-  } catch (err) {
-    await deleteObjects(put);
-    throw err;
-  }
-}
-
-async function deleteObjects(keys: (string | null | undefined)[]) {
-  const s = storage();
-  for (const key of keys) {
-    if (!key) continue;
+/** The package's files, ready to store: the normalized ZIP, the audio, and a 512px JPEG jacket. */
+async function prepareFiles(parsed: ParsedPackage, workDir: string) {
+  const m = parsed.manifest;
+  let jacket: string | null = null;
+  if (parsed.jacket) {
+    // JPEG rather than WebP: the game decodes jackets with Texture2D.LoadImage (PNG / JPEG only).
+    jacket = path.join(workDir, 'jacket.jpg');
     try {
-      await s.delete(key);
-    } catch (err) {
-      console.error('storage delete failed', key, err instanceof Error ? err.message : err);
-      await db().insert(retiredObjects).values({ key }).onConflictDoNothing();
+      await sharp(parsed.jacket.path, { limitInputPixels: 64_000_000 })
+        .rotate()
+        .resize(512, 512, { fit: 'cover' })
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality: 88, mozjpeg: true })
+        .toFile(jacket);
+    } catch {
+      throw new PackageError(`${parsed.jacket.name} 无法解码。`);
     }
   }
+  return {
+    package: {
+      path: parsed.packagePath,
+      extension: 'zip',
+      contentType: 'application/zip',
+      downloadName: downloadName({ scoreTitle: m.scoreTitle, difficulty: m.musicDifficultyType, playLevel: m.playLevel }),
+    },
+    audio: { path: parsed.audio.path, extension: parsed.audio.extension, contentType: parsed.audio.contentType },
+    jacket: jacket ? { path: jacket, extension: 'jpg', contentType: 'image/jpeg' } : null,
+  };
+}
+
+function metadataFrom(parsed: ParsedPackage) {
+  const m = parsed.manifest;
+  return {
+    title: m.title.slice(0, 200),
+    scoreTitle: m.scoreTitle.slice(0, 200),
+    composer: m.composer.slice(0, 200),
+    lyricist: m.lyricist.slice(0, 200),
+    arranger: m.arranger.slice(0, 200),
+    singer: m.singer.slice(0, 200),
+    collaborationLabel: m.collaborationLabel.slice(0, 200),
+    difficulty: m.musicDifficultyType,
+    playLevel: m.playLevel,
+    previewStartSec: m.previewStartTimeSec,
+    hasVideo: parsed.video !== null,
+  };
 }
 
 async function checkDailyLimit(userId: string) {
@@ -346,95 +373,100 @@ async function checkDailyLimit(userId: string) {
   if (n >= env().UPLOADS_PER_DAY) throw new TooMany(`24 小时内最多上传或更新 ${env().UPLOADS_PER_DAY} 次。`);
 }
 
-export async function createChart(viewer: Viewer, zipPath: string): Promise<number> {
+/** Returns the new chart's id. */
+export async function createChart(viewer: Viewer, zipPath: string): Promise<string> {
   await checkDailyLimit(viewer.id);
   return withWorkDir(async (dir) => {
     const parsed = await parsePackage(zipPath, dir);
-    const [{ id }] = await db().execute<{ id: string }>(sql`select nextval(pg_get_serial_sequence('charts', 'id')) as id`);
-    const chartId = Number(id);
-    const stored = await storeObjects(chartId, 1, parsed, dir);
-    const m = parsed.manifest;
-    try {
-      await db()
-        .insert(charts)
-        .values({
-          id: chartId,
-          uploaderId: viewer.id,
-          title: m.title.slice(0, 200),
-          scoreTitle: m.scoreTitle.slice(0, 200),
-          composer: m.composer.slice(0, 200),
-          lyricist: m.lyricist.slice(0, 200),
-          arranger: m.arranger.slice(0, 200),
-          singer: m.singer.slice(0, 200),
-          collaborationLabel: m.collaborationLabel.slice(0, 200),
-          description: m.description.slice(0, 2000),
-          difficulty: m.musicDifficultyType,
-          playLevel: m.playLevel,
-          previewStartSec: m.previewStartTimeSec,
-          hasVideo: parsed.video !== null,
-          revision: 1,
-          ...stored,
-        });
-    } catch (err) {
-      await deleteObjects([stored.packageKey, stored.audioKey, stored.jacketKey]);
-      throw err;
-    }
-    return chartId;
+    const prepared = await prepareFiles(parsed, dir);
+    const id = newChartId();
+    const uploaded: string[] = [];
+    await inFileTransaction(uploaded, async (tx) => {
+      const pkg = await storeFile(tx, prepared.package, uploaded);
+      const audio = await storeFile(tx, prepared.audio, uploaded);
+      const jacket: StoredFile | null = prepared.jacket ? await storeFile(tx, prepared.jacket, uploaded) : null;
+      await tx.insert(charts).values({
+        id,
+        uploaderId: viewer.id,
+        ...metadataFrom(parsed),
+        description: parsed.manifest.description.slice(0, 2000),
+        revision: 1,
+        packageFileId: pkg.id,
+        audioFileId: audio.id,
+        jacketFileId: jacket?.id ?? null,
+      });
+    });
+    return id;
   });
 }
 
-async function ownedChart(viewer: Viewer, chartId: number) {
+async function ownedChart(viewer: Viewer, chartId: string) {
+  const ref = parseChartRef(chartId);
+  if (!ref) throw new NotFound('谱面不存在。');
   const [row] = await db()
     .select()
     .from(charts)
-    .where(and(eq(charts.id, chartId), isNull(charts.deletedAt)));
+    .where(and(refCondition(ref), isNull(charts.deletedAt)));
   if (!row) throw new NotFound('谱面不存在。');
   if (row.uploaderId !== viewer.id && !viewer.isAdmin) throw new Forbidden('只有上传者可以修改这份谱面。');
   return row;
 }
 
+/** Legacy per-revision objects of a chart that has not been moved yet; they belong to it alone. */
+async function deleteLegacyObjects(row: { packageKey: string | null; audioKey: string | null; jacketKey: string | null }) {
+  for (const key of [row.packageKey, row.audioKey, row.jacketKey]) {
+    if (!key) continue;
+    try {
+      await storage().delete(key);
+    } catch (err) {
+      console.error('legacy object delete failed', key, err instanceof Error ? err.message : err);
+    }
+  }
+}
+
 /** Replaces the package. Song and chart metadata come from the new manifest; the site description is kept. */
-export async function replaceChart(viewer: Viewer, chartId: number, zipPath: string): Promise<void> {
+export async function replaceChart(viewer: Viewer, chartId: string, zipPath: string): Promise<void> {
   const current = await ownedChart(viewer, chartId);
   if (current.uploaderId === viewer.id) await checkDailyLimit(viewer.id);
   await withWorkDir(async (dir) => {
     const parsed = await parsePackage(zipPath, dir);
-    const revision = current.revision + 1;
-    const stored = await storeObjects(chartId, revision, parsed, dir);
-    const m = parsed.manifest;
-    const updated = await db()
-      .update(charts)
-      .set({
-        title: m.title.slice(0, 200),
-        scoreTitle: m.scoreTitle.slice(0, 200),
-        composer: m.composer.slice(0, 200),
-        lyricist: m.lyricist.slice(0, 200),
-        arranger: m.arranger.slice(0, 200),
-        singer: m.singer.slice(0, 200),
-        collaborationLabel: m.collaborationLabel.slice(0, 200),
-        difficulty: m.musicDifficultyType,
-        playLevel: m.playLevel,
-        previewStartSec: m.previewStartTimeSec,
-        hasVideo: parsed.video !== null,
-        revision,
-        updatedAt: new Date(),
-        ...stored,
-      })
-      .where(and(eq(charts.id, chartId), eq(charts.revision, current.revision), isNull(charts.deletedAt)))
-      .returning({ id: charts.id });
-    if (updated.length === 0) {
-      await deleteObjects([stored.packageKey, stored.audioKey, stored.jacketKey]);
-      throw new Conflict('谱面刚被修改过，请刷新后再试。');
-    }
-    await deleteObjects([current.packageKey, current.audioKey, current.jacketKey]);
+    const prepared = await prepareFiles(parsed, dir);
+    const uploaded: string[] = [];
+    await inFileTransaction(uploaded, async (tx) => {
+      const pkg = await storeFile(tx, prepared.package, uploaded);
+      const audio = await storeFile(tx, prepared.audio, uploaded);
+      const jacket: StoredFile | null = prepared.jacket ? await storeFile(tx, prepared.jacket, uploaded) : null;
+      const updated = await tx
+        .update(charts)
+        .set({
+          ...metadataFrom(parsed),
+          revision: current.revision + 1,
+          updatedAt: new Date(),
+          packageFileId: pkg.id,
+          audioFileId: audio.id,
+          jacketFileId: jacket?.id ?? null,
+          packageKey: null,
+          packageSize: null,
+          packageSha256: null,
+          audioKey: null,
+          jacketKey: null,
+        })
+        .where(and(eq(charts.id, current.id), eq(charts.revision, current.revision), isNull(charts.deletedAt)))
+        .returning({ id: charts.id });
+      if (updated.length === 0) throw new Conflict('谱面刚被修改过，请刷新后再试。');
+    });
   });
+  // After the commit: the old files are released unless another chart (or the new revision) still uses them.
+  await releaseFiles([current.packageFileId, current.audioFileId, current.jacketFileId]);
+  await deleteLegacyObjects(current);
 }
 
 export interface ChartInfoUpdate {
   description: string;
   tags: string[];
   allowDerivative: boolean;
-  parentChartId: number | null;
+  /** The parent's id or number, or null. */
+  parentChart: string | null;
 }
 
 export function normalizeTags(input: string[]): string[] {
@@ -447,13 +479,13 @@ export function normalizeTags(input: string[]): string[] {
   return out;
 }
 
-export async function updateChartInfo(viewer: Viewer, chartId: number, info: ChartInfoUpdate): Promise<void> {
-  await ownedChart(viewer, chartId);
-  let parent: number | null = null;
-  if (info.parentChartId !== null) {
-    if (info.parentChartId === chartId) throw new PackageError('親譜面不能是这份谱面自己。');
-    const found = await getChart(info.parentChartId);
-    if (!found) throw new PackageError(`找不到编号为 ${info.parentChartId} 的谱面。`);
+export async function updateChartInfo(viewer: Viewer, chartId: string, info: ChartInfoUpdate): Promise<void> {
+  const row = await ownedChart(viewer, chartId);
+  let parent: string | null = null;
+  if (info.parentChart) {
+    const found = await getChart(info.parentChart);
+    if (!found) throw new PackageError(`找不到谱面 ${info.parentChart}。`);
+    if (found.id === row.id) throw new PackageError('親譜面不能是这份谱面自己。');
     parent = found.id;
   }
   await db()
@@ -464,22 +496,44 @@ export async function updateChartInfo(viewer: Viewer, chartId: number, info: Cha
       allowDerivative: info.allowDerivative,
       parentChartId: parent,
     })
-    .where(eq(charts.id, chartId));
+    .where(eq(charts.id, row.id));
 }
 
-export async function deleteChart(viewer: Viewer, chartId: number): Promise<void> {
+export async function deleteChart(viewer: Viewer, chartId: string): Promise<void> {
   const row = await ownedChart(viewer, chartId);
   const [done] = await db()
     .update(charts)
-    .set({ deletedAt: new Date() })
-    .where(and(eq(charts.id, chartId), isNull(charts.deletedAt)))
+    .set({
+      deletedAt: new Date(),
+      packageFileId: null,
+      audioFileId: null,
+      jacketFileId: null,
+      packageKey: null,
+      audioKey: null,
+      jacketKey: null,
+    })
+    .where(and(eq(charts.id, row.id), isNull(charts.deletedAt)))
     .returning({ id: charts.id });
-  if (done) await deleteObjects([row.packageKey, row.audioKey, row.jacketKey]);
+  if (!done) return;
+  await releaseFiles([row.packageFileId, row.audioFileId, row.jacketFileId]);
+  await deleteLegacyObjects(row);
 }
 
 /* ---------- interactions ---------- */
 
-export async function setLike(viewer: Viewer, chartId: number, liked: boolean): Promise<number> {
+async function liveChartId(ref: string): Promise<string | null> {
+  const parsed = parseChartRef(ref);
+  if (!parsed) return null;
+  const [row] = await db()
+    .select({ id: charts.id })
+    .from(charts)
+    .where(and(refCondition(parsed), isNull(charts.deletedAt)));
+  return row?.id ?? null;
+}
+
+export async function setLike(viewer: Viewer, ref: string, liked: boolean): Promise<number> {
+  const chartId = await liveChartId(ref);
+  if (!chartId) throw new NotFound('谱面不存在。');
   return db().transaction(async (tx) => {
     const [chart] = await tx
       .select({ id: charts.id })
@@ -499,7 +553,9 @@ export async function setLike(viewer: Viewer, chartId: number, liked: boolean): 
 }
 
 /** Counts a play reported by the game: one per actor per chart per hour. Returns the new total. */
-export async function recordPlay(chartId: number, actor: string): Promise<number | null> {
+export async function recordPlay(ref: string, actor: string): Promise<number | null> {
+  const chartId = await liveChartId(ref);
+  if (!chartId) return null;
   return db().transaction(async (tx) => {
     const [chart] = await tx
       .select({ id: charts.id, playCount: charts.playCount })
@@ -530,9 +586,9 @@ export function anonymousActor(address: string): string {
   return `addr:${sha256Hex(`${day}|${address}`).slice(0, 32)}`;
 }
 
-export async function setBookmark(viewer: Viewer, chartId: number, saved: boolean): Promise<void> {
-  const chart = await getChart(chartId);
-  if (!chart) throw new NotFound('谱面不存在。');
+export async function setBookmark(viewer: Viewer, ref: string, saved: boolean): Promise<void> {
+  const chartId = await liveChartId(ref);
+  if (!chartId) throw new NotFound('谱面不存在。');
   if (saved) {
     await db().insert(bookmarks).values({ chartId, userId: viewer.id }).onConflictDoNothing();
   } else {
@@ -547,13 +603,16 @@ export async function listTags(limit = 30): Promise<{ tag: string; count: number
   return rows.map((r) => ({ tag: r.tag, count: Number(r.count) }));
 }
 
-export async function recordDownload(chartId: number): Promise<string | null> {
-  const [row] = await db()
+/** Counts a download and returns the package's CDN URL. */
+export async function recordDownload(ref: string): Promise<string | null> {
+  const chartId = await liveChartId(ref);
+  if (!chartId) return null;
+  await db()
     .update(charts)
     .set({ downloadCount: sql`${charts.downloadCount} + 1` })
-    .where(and(eq(charts.id, chartId), isNull(charts.deletedAt)))
-    .returning({ packageKey: charts.packageKey });
-  return row ? storage().publicUrl(row.packageKey) : null;
+    .where(eq(charts.id, chartId));
+  const chart = await getChart(chartId);
+  return chart?.packageUrl ?? null;
 }
 
 export interface CommentView {
@@ -563,7 +622,7 @@ export interface CommentView {
   user: { id: string; nickname: string; avatarUrl: string | null };
 }
 
-export async function listComments(chartId: number): Promise<CommentView[]> {
+export async function listComments(chartId: string): Promise<CommentView[]> {
   const rows = await db()
     .select({
       id: comments.id,
@@ -586,7 +645,7 @@ export async function listComments(chartId: number): Promise<CommentView[]> {
   }));
 }
 
-async function syncCommentCount(chartId: number) {
+async function syncCommentCount(chartId: string) {
   await db()
     .update(charts)
     .set({
@@ -595,12 +654,12 @@ async function syncCommentCount(chartId: number) {
     .where(eq(charts.id, chartId));
 }
 
-export async function addComment(viewer: Viewer, chartId: number, body: string): Promise<void> {
+export async function addComment(viewer: Viewer, ref: string, body: string): Promise<void> {
   const text = body.trim();
   if (!text) throw new PackageError('评论不能为空。');
   if (text.length > 1000) throw new PackageError('评论最多 1000 字。');
-  const chart = await getChart(chartId);
-  if (!chart) throw new NotFound('谱面不存在。');
+  const chartId = await liveChartId(ref);
+  if (!chartId) throw new NotFound('谱面不存在。');
   const since = new Date(Date.now() - 60_000);
   const [{ n }] = await db()
     .select({ n: count() })
@@ -611,7 +670,8 @@ export async function addComment(viewer: Viewer, chartId: number, body: string):
   await syncCommentCount(chartId);
 }
 
-export async function deleteComment(viewer: Viewer, commentId: number): Promise<number> {
+/** Returns the chart's id. */
+export async function deleteComment(viewer: Viewer, commentId: number): Promise<string> {
   const [row] = await db()
     .select({ chartId: comments.chartId, userId: comments.userId, uploaderId: charts.uploaderId })
     .from(comments)

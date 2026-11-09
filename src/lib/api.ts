@@ -1,11 +1,11 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
-import { SORTS, type ListQuery, type Sort } from '@/lib/charts';
+import { parseChartRef, SORTS, type ListQuery, type Sort } from '@/lib/charts';
 import { DIFFICULTIES, type Difficulty } from '@/lib/db/schema';
 
-export function chartIdParam(raw: string): number | null {
-  const id = Number(raw);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
+/** A chart reference in a URL: the 32-hex id or the number. Returns it unchanged, or null if malformed. */
+export function chartIdParam(raw: string): string | null {
+  return parseChartRef(raw) ? raw.trim().toLowerCase() : null;
 }
 
 export function notFound(message = '谱面不存在。') {

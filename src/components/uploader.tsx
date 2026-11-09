@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import { Button, cx, formatBytes, Notice } from '@/components/ui';
 
 /** Sends the ZIP as the raw body of PUT /api/v1/uploads, with progress. */
-export function Uploader({ chartId, maxMb }: { chartId?: number; maxMb: number }) {
+export function Uploader({ chartId, maxMb }: { chartId?: string; maxMb: number }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -42,7 +42,7 @@ export function Uploader({ chartId, maxMb }: { chartId?: number; maxMb: number }
     xhr.onload = () => {
       setProcessing(false);
       setProgress(null);
-      let body: { id?: number; error?: { message?: string } } = {};
+      let body: { id?: string; error?: { message?: string } } = {};
       try {
         body = JSON.parse(xhr.responseText);
       } catch {}

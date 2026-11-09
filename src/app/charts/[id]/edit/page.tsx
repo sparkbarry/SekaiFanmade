@@ -11,9 +11,10 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: '管理谱面' };
 
 export default async function EditChart({ params }: { params: Promise<{ id: string }> }) {
-  const id = Number((await params).id);
-  const chart = await getChart(id);
+  const chart = await getChart((await params).id);
   if (!chart) notFound();
+  const id = chart.id;
+  const parent = chart.parentChartId ? await getChart(chart.parentChartId) : null;
   const viewer = await getViewer();
   if (!viewer) redirect(`/auth/login?next=${encodeURIComponent(`/charts/${id}/edit`)}`);
   if (viewer.id !== chart.uploader.id && !viewer.isAdmin) notFound();
@@ -36,7 +37,7 @@ export default async function EditChart({ params }: { params: Promise<{ id: stri
           description={chart.description}
           tags={chart.tags}
           allowDerivative={chart.allowDerivative}
-          parentChartId={chart.parentChartId}
+          parentChart={parent ? String(parent.numberId) : ''}
         />
       </Card>
 

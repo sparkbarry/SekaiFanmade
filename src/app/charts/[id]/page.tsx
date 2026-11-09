@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { Jacket } from '@/components/chart-card';
 import { Comments } from '@/components/comments';
 import { LikeButton } from '@/components/like-button';
@@ -14,14 +14,17 @@ export const dynamic = 'force-dynamic';
 type Params = Promise<{ id: string }>;
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
-  const chart = await getChart(Number((await params).id));
+  const chart = await getChart((await params).id);
   return chart ? { title: `${chart.scoreTitle}（${chart.title}）` } : { title: '谱面不存在' };
 }
 
 export default async function ChartPage({ params }: { params: Params }) {
-  const id = Number((await params).id);
-  const chart = await getChart(id);
+  const ref = (await params).id;
+  const chart = await getChart(ref);
   if (!chart) notFound();
+  // /charts/12 (the number) works too; send it to the id URL.
+  if (ref !== chart.id) redirect(`/charts/${chart.id}`);
+  const id = chart.id;
   const viewer = await getViewer();
   const [comments, liked] = await Promise.all([listComments(id), viewer ? hasLiked(id, viewer.id) : false]);
   const canEdit = !!viewer && (viewer.id === chart.uploader.id || viewer.isAdmin);
@@ -60,10 +63,10 @@ export default async function ChartPage({ params }: { params: Params }) {
                   href={`/charts/${chart.parentChartId}`}
                   className="rounded-full border-[1.5px] border-outline bg-[#c9f3e6] px-2.5 py-0.5 text-xs font-bold text-[#382d2a] hover:underline"
                 >
-                  親譜面 #{chart.parentChartId}
+                  親譜面
                 </Link>
               )}
-              <span className="text-xs text-muted">#{chart.id}</span>
+              <span className="text-xs text-muted">#{chart.numberId}</span>
             </div>
             <h1 className="break-words text-2xl font-black leading-tight sm:text-3xl">{chart.scoreTitle}</h1>
             {chart.scoreTitle !== chart.title && <p className="text-lg font-bold">{chart.title}</p>}

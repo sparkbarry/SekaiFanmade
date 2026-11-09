@@ -50,10 +50,35 @@ export const sessions = pgTable(
   (t) => [index('sessions_user_idx').on(t.userId)],
 );
 
+/**
+ * Stored objects, content-addressed like OurTaiko Fanmade: the key is `<sha256>.<extension>` under the
+ * site's prefix, flat in the bucket. Charts that upload the same bytes share one row and one object;
+ * an object is deleted once no chart refers to it.
+ */
+export const files = pgTable(
+  'files',
+  {
+    id: bigserial({ mode: 'number' }).primaryKey(),
+    storageKey: text().notNull().unique(),
+    sha256: text().notNull(),
+    extension: text().notNull(),
+    byteSize: bigint({ mode: 'number' }).notNull(),
+    contentType: text().notNull(),
+    createdAt: now(),
+  },
+  (t) => [
+    check('files_sha256_check', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+    check('files_storage_key_check', sql`${t.storageKey} = ${t.sha256} || '.' || ${t.extension}`),
+  ],
+);
+
 export const charts = pgTable(
   'charts',
   {
-    id: bigserial({ mode: 'number' }).primaryKey(),
+    /** 32 random lowercase hex digits, like OurTaiko Fanmade and SSO user IDs. */
+    id: text().primaryKey(),
+    /** Short public number for typing (譜面ID検索, #12 in search). Existing charts kept their old numbers. */
+    numberId: bigint({ mode: 'number' }).notNull().unique().generatedByDefaultAsIdentity(),
     uploaderId: text()
       .notNull()
       .references(() => users.id),
@@ -69,19 +94,24 @@ export const charts = pgTable(
     playLevel: integer().notNull(),
     previewStartSec: real().notNull().default(0),
     hasVideo: boolean().notNull().default(false),
-    /** Bumped every time the package is replaced; storage keys include it. */
+    /** Bumped every time the package is replaced, so the game can tell an installed copy is outdated. */
     revision: integer().notNull().default(1),
     /** Free tags set by the uploader (スタンダード, ネタ譜面, ...). */
     tags: text().array().notNull().default(sql`'{}'::text[]`),
     /** 二次利用OK: others may base their charts on this one. */
     allowDerivative: boolean().notNull().default(false),
     /** 親譜面: the chart this one was derived from. */
-    parentChartId: bigint({ mode: 'number' }).references((): AnyPgColumn => charts.id, { onDelete: 'set null' }),
-    packageKey: text().notNull(),
-    packageSize: bigint({ mode: 'number' }).notNull(),
-    packageSha256: text().notNull(),
+    parentChartId: text().references((): AnyPgColumn => charts.id, { onDelete: 'set null' }),
+    /** Null only on deleted charts (their files are released) and, until moved, on charts with legacy keys. */
+    packageFileId: bigint({ mode: 'number' }).references(() => files.id),
+    audioFileId: bigint({ mode: 'number' }).references(() => files.id),
+    jacketFileId: bigint({ mode: 'number' }).references(() => files.id),
+    /** Legacy per-revision keys (charts/<id>/r<n>/...); moved to files by lib/legacy-files.ts, dropped later. */
+    packageKey: text(),
+    packageSize: bigint({ mode: 'number' }),
+    packageSha256: text(),
     jacketKey: text(),
-    audioKey: text().notNull(),
+    audioKey: text(),
     downloadCount: integer().notNull().default(0),
     /** Plays reported by the game (POST /api/v1/charts/<id>/plays), at most one per player per hour. */
     playCount: integer().notNull().default(0),
@@ -94,6 +124,7 @@ export const charts = pgTable(
   (t) => [
     index('charts_list_idx').on(t.createdAt.desc()).where(sql`${t.deletedAt} is null`),
     index('charts_uploader_idx').on(t.uploaderId),
+    check('charts_id_check', sql`${t.id} ~ '^[0-9a-f]{32}$'`),
     check('charts_difficulty_check', sql`${t.difficulty} in ('easy','normal','hard','expert','master','append')`),
     check('charts_level_check', sql`${t.playLevel} between 0 and 99`),
     check('charts_tags_check', sql`cardinality(${t.tags}) <= 8`),
@@ -104,7 +135,7 @@ export const charts = pgTable(
 export const chartLikes = pgTable(
   'chart_likes',
   {
-    chartId: bigint({ mode: 'number' })
+    chartId: text()
       .notNull()
       .references(() => charts.id, { onDelete: 'cascade' }),
     userId: text()
@@ -119,7 +150,7 @@ export const comments = pgTable(
   'comments',
   {
     id: bigserial({ mode: 'number' }).primaryKey(),
-    chartId: bigint({ mode: 'number' })
+    chartId: text()
       .notNull()
       .references(() => charts.id, { onDelete: 'cascade' }),
     userId: text()
@@ -146,7 +177,7 @@ export const chartPlays = pgTable(
   'chart_plays',
   {
     id: bigserial({ mode: 'number' }).primaryKey(),
-    chartId: bigint({ mode: 'number' })
+    chartId: text()
       .notNull()
       .references(() => charts.id, { onDelete: 'cascade' }),
     actor: text().notNull(),
@@ -159,7 +190,7 @@ export const chartPlays = pgTable(
 export const bookmarks = pgTable(
   'bookmarks',
   {
-    chartId: bigint({ mode: 'number' })
+    chartId: text()
       .notNull()
       .references(() => charts.id, { onDelete: 'cascade' }),
     userId: text()

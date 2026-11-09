@@ -9,13 +9,14 @@ export function ChartInfoForm({
   description,
   tags,
   allowDerivative,
-  parentChartId,
+  parentChart,
 }: {
-  chartId: number;
+  chartId: string;
   description: string;
   tags: string[];
   allowDerivative: boolean;
-  parentChartId: number | null;
+  /** The parent's number, or empty. */
+  parentChart: string;
 }) {
   const [state, action, pending] = useActionState(saveChartInfoAction, {});
   return (
@@ -37,9 +38,9 @@ export function ChartInfoForm({
       <label className="flex flex-col gap-1 text-sm font-bold">
         親譜面
         <input
-          name="parentChartId"
+          name="parentChart"
           inputMode="numeric"
-          defaultValue={parentChartId ?? ''}
+          defaultValue={parentChart}
           placeholder="改编自哪份谱面，填它的编号"
           className={inputClass}
         />
@@ -55,7 +56,7 @@ export function ChartInfoForm({
   );
 }
 
-export function DeleteChartForm({ chartId }: { chartId: number }) {
+export function DeleteChartForm({ chartId }: { chartId: string }) {
   const [state, action, pending] = useActionState(deleteChartAction, {});
   return (
     <form

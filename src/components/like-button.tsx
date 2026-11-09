@@ -4,7 +4,7 @@ import { useOptimistic, useState, useTransition } from 'react';
 import { toggleLikeAction } from '@/app/actions';
 import { cx } from '@/components/ui';
 
-export function LikeButton({ chartId, liked, count, signedIn }: { chartId: number; liked: boolean; count: number; signedIn: boolean }) {
+export function LikeButton({ chartId, liked, count, signedIn }: { chartId: string; liked: boolean; count: number; signedIn: boolean }) {
   const [state, setState] = useState({ liked, count });
   const [optimistic, setOptimistic] = useOptimistic(state);
   const [pending, start] = useTransition();

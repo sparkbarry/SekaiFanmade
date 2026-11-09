@@ -15,6 +15,13 @@
       "when": 1794197464572,
       "tag": "0001_game_browser",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794200702556,
+      "tag": "0002_random_ids_and_hashed_files",
+      "breakpoints": true
     }
   ]
 }

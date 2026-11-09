@@ -11,7 +11,7 @@ export function Comments({
   viewerId,
   canModerate,
 }: {
-  chartId: number;
+  chartId: string;
   comments: CommentView[];
   viewerId: string | null;
   canModerate: boolean;
