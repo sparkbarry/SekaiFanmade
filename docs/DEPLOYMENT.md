@@ -107,3 +107,12 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 给 `ourtaiko_viewer` 授 `sekai_fanmade` 的 CONNECT、`public` 与 `drizzle` 的 USAGE 和全部表的 SELECT，撤掉 `sessions`；`ALTER DEFAULT PRIVILEGES FOR ROLE sekai_fanmade` 让以后新建的表也可读。
 - CloudBeaver：停容器，备份 `data-sources.json` 为 `data-sources.json.before-sekai-fanmade-20261109T045923Z`，复制 Fanmade 只读连接的配置（同一账号与已保存的密码）新增 `postgres-jdbc-sekai_fanmade`，重启后 `/status` 200。服务器 README 已补一行。
 - 核对：用该账号连库能读 `charts`、`users`；读 `sessions` 被拒；UPDATE 报只读事务。没有登录 CloudBeaver 网页界面查看。
+
+### 2026-11-09 随机 ID 与内容寻址文件（`bb6954e`，迁移 0002）
+
+- 内容：谱面 `id` 改为 32 位随机十六进制，原数字留作 `number_id`；对象改为平铺的 `sekai-fanmade/<sha256>.<ext>`，`files` 表与引用计数式删除（见 README「ID 与存储」）。游戏端是 OpenSekai `11422bc`。
+- 发布前：1 首谱面（旧键 `charts/1/r1/...`，下载 5 次）、1 个用户，其余表为空，迁移 2 条，无 `idle in transaction`。备份 `/var/backups/sekai-fanmade/pre-0002-20261109T051628Z.dump`（root 600，`pg_restore --list` 正常）。
+- 发布后：迁移 3 条；启动任务 `moved chart 1 (35300290027345d2a997e81dcc247e78)`，`{ moved: 1, cleared: 0, failed: 0 }`。`files` 3 行（zip 7565962、ogg 7146133、jpg 19024 字节），`retired_objects` 0。桶内 `sekai-fanmade/` 只剩这 3 个对象，旧键已删。
+- 核对：经 CDN 下载 3 个对象的 SHA-256 与键名一致；ZIP 的 Content-Disposition 是「言って。 [MASTER 30].zip」，`immutable` 一年缓存，CORS `*`；`/api/v1/charts/1` 与按 id 都 200，`/charts/1` 307 到 id 网址，`/charts/1/download` 302 到哈希 ZIP，`#1` 搜得到；伪造游戏令牌 401；fanmade、database、profile 200，sso 302。
+- 旧键 `charts/1/r1/package.zip` 经 CDN 仍是 200：CloudFront 边缘缓存（旧对象带一年缓存头），S3 上已删。没有地方再引用它；要立即清掉需在 CloudFront 对 `/sekai-fanmade/charts/*` 做 invalidation（本站 IAM 用户没有这个权限）。
+- 还没做：删除旧列 `package_key`、`package_size`、`package_sha256`、`audio_key`、`jacket_key` 的后续迁移；没用真实账号在游戏里对新版本登录、下载、游玩。
