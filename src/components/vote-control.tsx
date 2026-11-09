@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { cx } from '@/components/ui';
+import { cx, DownIcon, UpIcon } from '@/components/ui';
 
 export type Vote = -1 | 0 | 1;
 
@@ -72,12 +72,16 @@ export function VoteControl({
         aria-pressed={active}
         aria-label={direction === 1 ? '赞' : '踩'}
         className={cx(
-          'flex items-center justify-center rounded-[8px] font-black transition-colors disabled:opacity-40',
-          size === 'sm' ? 'size-6 text-sm' : 'size-9 text-lg',
-          active ? (direction === 1 ? 'bg-pop text-[#382d2a]' : 'bg-[#8fa8ff] text-[#382d2a]') : 'hover:bg-cream',
+          'grid place-items-center rounded-full transition-colors disabled:opacity-40',
+          size === 'sm' ? 'size-8' : 'size-10',
+          active
+            ? direction === 1
+              ? 'bg-up-soft text-up'
+              : 'bg-down-soft text-down'
+            : 'text-muted hover:bg-surface-high hover:text-foreground',
         )}
       >
-        {direction === 1 ? '▲' : '▼'}
+        {direction === 1 ? <UpIcon className="size-3.5" /> : <DownIcon className="size-3.5" />}
       </button>
     );
   };
@@ -85,18 +89,17 @@ export function VoteControl({
   return (
     <span className="inline-flex items-center gap-1">
       <span
-        className={cx(
-          'inline-flex items-center gap-0.5 rounded-[10px] border-outline bg-card',
-          size === 'sm' ? 'border-[1.5px] px-0.5' : 'border-2 px-1 py-0.5 shadow-press',
-        )}
+        role="group"
+        aria-label="投票"
+        className={cx('inline-flex items-center', size === 'sm' ? 'gap-0.5' : 'min-h-12 rounded-full bg-surface px-1')}
       >
         {arrow(1)}
         <span
           className={cx(
-            'min-w-6 text-center font-black tabular-nums',
-            size === 'sm' ? 'text-xs' : 'text-sm',
-            state.myVote === 1 && 'text-[#d6336c] dark:text-pop',
-            state.myVote === -1 && 'text-[#3f5bd6] dark:text-[#8fa8ff]',
+            'min-w-7 text-center font-bold tabular-nums',
+            size === 'sm' ? 'text-[13px]' : 'text-[15px]',
+            state.myVote === 1 && 'text-up',
+            state.myVote === -1 && 'text-down',
           )}
         >
           {state.score}

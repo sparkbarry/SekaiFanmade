@@ -1,7 +1,7 @@
-import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { ChartInfoForm, DeleteChartForm } from '@/components/chart-manage';
-import { Card, DifficultyBadge } from '@/components/ui';
+import { PageBar } from '@/components/page-bar';
+import { DifficultyBadge, Section } from '@/components/ui';
 import { Uploader } from '@/components/uploader';
 import { getChart } from '@/lib/charts';
 import { env } from '@/lib/env';
@@ -20,39 +20,38 @@ export default async function EditChart({ params }: { params: Promise<{ id: stri
   if (viewer.id !== chart.uploader.id && !viewer.isAdmin) notFound();
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <Link href={`/charts/${id}`} className="text-sm text-link hover:underline">
-          ← 返回谱面
-        </Link>
-        <h1 className="flex flex-wrap items-center gap-2 text-2xl font-black">
-          {chart.scoreTitle} <DifficultyBadge difficulty={chart.difficulty} level={chart.playLevel} />
+    <>
+      <PageBar crumbs={[{ label: '谱面广场', href: '/' }, { label: chart.scoreTitle, href: `/charts/${id}` }, { label: '管理' }]} />
+      <header className="flex flex-col gap-2 px-1 pt-1">
+        <DifficultyBadge difficulty={chart.difficulty} level={chart.playLevel} size="sm" />
+        <h1 className="text-[26px] leading-9 font-semibold sm:text-[32px] sm:leading-10">
+          管理 <span className="title-mark">{chart.scoreTitle}</span>
         </h1>
+      </header>
+
+      <div className="grid max-w-5xl items-start gap-5 lg:grid-cols-2">
+        <Section title="谱面信息">
+          <ChartInfoForm
+            chartId={id}
+            description={chart.description}
+            tags={chart.tags}
+            allowDerivative={chart.allowDerivative}
+            parentChart={parent ? String(parent.numberId) : ''}
+          />
+        </Section>
+
+        <div className="flex flex-col gap-5">
+          <Section title="上传新版本">
+            <p className="text-[13px] leading-5 text-muted">
+              曲名、难度、作者等信息改为新 ZIP 里 manifest.json 的内容；简介、标签、得分、评论、游玩和下载次数保留。
+            </p>
+            <Uploader chartId={id} maxMb={env().UPLOAD_MAX_MB} />
+          </Section>
+          <Section title="删除">
+            <DeleteChartForm chartId={id} />
+          </Section>
+        </div>
       </div>
-
-      <Card className="flex flex-col gap-3 p-6">
-        <h2 className="font-black">谱面信息</h2>
-        <ChartInfoForm
-          chartId={id}
-          description={chart.description}
-          tags={chart.tags}
-          allowDerivative={chart.allowDerivative}
-          parentChart={parent ? String(parent.numberId) : ''}
-        />
-      </Card>
-
-      <Card className="flex flex-col gap-3 p-6">
-        <h2 className="font-black">上传新版本</h2>
-        <p className="text-xs text-muted">
-          曲名、难度、作者等信息改为新 ZIP 里 manifest.json 的内容；简介、标签、喜欢、评论、游玩和下载次数保留。
-        </p>
-        <Uploader chartId={id} maxMb={env().UPLOAD_MAX_MB} />
-      </Card>
-
-      <Card className="flex flex-col gap-3 p-6">
-        <h2 className="font-black">删除</h2>
-        <DeleteChartForm chartId={id} />
-      </Card>
-    </div>
+    </>
   );
 }

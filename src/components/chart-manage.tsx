@@ -22,20 +22,20 @@ export function ChartInfoForm({
   return (
     <form action={action} className="flex flex-col gap-3">
       <input type="hidden" name="chartId" value={chartId} />
-      <label className="flex flex-col gap-1 text-sm font-bold">
+      <label className="flex flex-col gap-1.5 text-sm font-semibold">
         简介
         <textarea name="description" defaultValue={description} maxLength={2000} rows={5} className={inputClass} />
       </label>
-      <label className="flex flex-col gap-1 text-sm font-bold">
+      <label className="flex flex-col gap-1.5 text-sm font-semibold">
         标签
         <input name="tags" defaultValue={tags.join(', ')} placeholder="スタンダード, ネタ譜面" className={inputClass} />
         <span className="text-xs font-normal text-muted">用逗号分隔，最多 8 个，每个最多 20 字。</span>
       </label>
-      <label className="flex items-center gap-2 text-sm font-bold">
-        <input type="checkbox" name="allowDerivative" defaultChecked={allowDerivative} className="size-4 accent-[var(--brand)]" />
+      <label className="flex items-center gap-3 text-sm font-semibold">
+        <input type="checkbox" name="allowDerivative" defaultChecked={allowDerivative} className="size-5 accent-[var(--primary)]" />
         二次利用OK（允许别人以这份谱面为基础改编）
       </label>
-      <label className="flex flex-col gap-1 text-sm font-bold">
+      <label className="flex flex-col gap-1.5 text-sm font-semibold">
         親譜面
         <input
           name="parentChart"

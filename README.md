@@ -30,6 +30,7 @@ OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上�
 | `src/lib/file-store.ts`、`jobs.ts`、`src/instrumentation.ts` | 内容寻址文件、后台重试删除 |
 | `src/lib/db/schema.ts`、`drizzle/` | 表结构与迁移（容器启动时自动执行） |
 | `src/app/` | 页面、server actions、`/api/v1/*`、`/auth/*` |
+| `src/app/globals.css`、`src/components/` | 界面：仿 Moesekai 的 Material 3 风格（浅灰底、青绿强调色、浮动侧栏、白卡片），颜色都是 `globals.css` 里的变量，跟随系统深浅色；侧栏 `side-nav.tsx`，顶栏 `page-bar.tsx`，基础组件 `ui.tsx`。设计稿在 Claude Design 画布「Sekai Fanmade redesign」 |
 | `deploy/` | 生产 Compose、OpenResty 片段、发布脚本、环境变量示例 |
 
 ## 登录

@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Avatar, Button, cx, formatDateTime, inputClass, Notice } from '@/components/ui';
+import { Avatar, Button, cx, formatDateTime, inputClass, Notice, segmentClass, segmentTrackClass } from '@/components/ui';
 import { VoteControl, type Vote } from '@/components/vote-control';
 import { MORE_POLICY, NARROW_POLICY, planReplies, WIDE_POLICY } from '@/lib/comment-folding';
 
@@ -119,7 +119,7 @@ function CommentForm({
         className={inputClass}
       />
       {error && <Notice tone="error">{error}</Notice>}
-      <div className="flex gap-2">
+      <div className="flex justify-end gap-2">
         <Button type="submit" disabled={pending || !body.trim()}>
           {pending ? '发送中…' : submitLabel}
         </Button>
@@ -198,28 +198,27 @@ export function Comments({
   const count = data?.commentCount ?? initialCount;
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-black">
-          评论 {count > 0 && <span className="text-muted">{count}</span>}
+    <section aria-labelledby="comments-title" className="flex flex-col gap-4 rounded-[28px] bg-card p-5 shadow-elev-1 sm:p-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 id="comments-title" className="text-lg font-semibold">
+          评论 {count > 0 && <span className="font-medium text-muted">{count}</span>}
         </h2>
-        <label className="ml-auto flex items-center gap-2 text-sm">
-          <span className="whitespace-nowrap text-muted">排序</span>
-          <select
-            value={sort}
-            onChange={(e) => {
-              setSort(e.target.value as Sort);
-              setPage(1);
-            }}
-            className={cx(inputClass, 'w-auto py-1')}
-          >
-            {SORTS.map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div role="group" aria-label="评论排序" className={cx(segmentTrackClass, 'ml-auto')}>
+          {SORTS.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={sort === key}
+              onClick={() => {
+                setSort(key);
+                setPage(1);
+              }}
+              className={segmentClass(sort === key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {viewer ? (
@@ -233,8 +232,8 @@ export function Comments({
           }}
         />
       ) : (
-        <p className="text-sm">
-          <a className="font-bold text-link underline" href={`/auth/login?next=${encodeURIComponent(loginNext)}`}>
+        <p className="rounded-2xl bg-surface px-4 py-3 text-sm text-muted">
+          <a className="font-semibold text-link underline" href={`/auth/login?next=${encodeURIComponent(loginNext)}`}>
             登录
           </a>
           后可以评论和投票。
@@ -243,7 +242,7 @@ export function Comments({
 
       {error && <Notice tone="error">{error}</Notice>}
       {data && data.items.length === 0 && <p className="text-sm text-muted">还没有评论</p>}
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-5">
         {data?.items.map((c) => (
           <CommentView
             key={c.id}
@@ -262,7 +261,7 @@ export function Comments({
           <Button variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
             上一页
           </Button>
-          <span className="text-sm font-bold tabular-nums">
+          <span className="text-sm font-semibold tabular-nums">
             {page} / {pages}
           </span>
           <Button variant="outline" disabled={page >= pages} onClick={() => setPage(page + 1)}>
@@ -306,8 +305,8 @@ function CommentView({
   } else {
     header = (
       <>
-        <Avatar src={comment.author!.avatarUrl} name={comment.author!.nickname} size={24} />
-        <a href={`/users/${comment.author!.id}`} className="text-sm font-bold hover:underline">
+        <Avatar src={comment.author!.avatarUrl} name={comment.author!.nickname} size={28} />
+        <a href={`/users/${comment.author!.id}`} className="text-sm font-semibold hover:underline">
           {comment.author!.nickname}
         </a>
       </>
@@ -315,15 +314,18 @@ function CommentView({
   }
 
   return (
-    <div className={cx('flex flex-col gap-1', comment.depth === 0 && 'rounded-[10px] border-[1.5px] border-border bg-card p-3')}>
+    <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setOpen(!open)}
           aria-label={open ? '折叠' : '展开'}
-          className="w-5 text-xs text-muted hover:text-foreground"
+          aria-expanded={open}
+          className="grid size-7 place-items-center rounded-full text-muted hover:bg-surface hover:text-foreground"
         >
-          {open ? '[−]' : '[+]'}
+          <svg aria-hidden viewBox="0 0 24 24" className={cx('size-4 transition', !open && '-rotate-90')} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
         </button>
         {header}
         <time className="text-xs text-muted" dateTime={comment.createdAt}>
@@ -333,7 +335,7 @@ function CommentView({
         {!open && <span className="text-xs text-muted">得分 {comment.score}</span>}
       </div>
       {open && (
-        <div className="flex flex-col gap-2 border-l-2 border-border pl-4">
+        <div className="ml-[13px] flex flex-col gap-2 border-l-2 border-border pl-5">
           {gone ? null : mode === 'edit' ? (
             <CommentForm
               placeholder="编辑评论"
@@ -348,11 +350,11 @@ function CommentView({
               }}
             />
           ) : (
-            <p className="whitespace-pre-wrap break-words text-sm">
+            <p className="whitespace-pre-wrap break-words text-sm leading-6">
               <Linkified text={comment.body ?? ''} />
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="-ml-2 flex flex-wrap items-center gap-1 text-[13px]">
             <VoteControl
               kind="comment"
               id={comment.id}
@@ -364,19 +366,19 @@ function CommentView({
               disabled={gone && comment.myVote === 0}
             />
             {!gone && viewer && (
-              <button type="button" className="font-bold text-muted hover:text-foreground" onClick={() => setMode(mode === 'reply' ? 'view' : 'reply')}>
+              <button type="button" className="min-h-8 rounded-full px-2.5 font-medium text-muted hover:bg-surface hover:text-foreground" onClick={() => setMode(mode === 'reply' ? 'view' : 'reply')}>
                 回复
               </button>
             )}
             {!gone && mine && (
-              <button type="button" className="font-bold text-muted hover:text-foreground" onClick={() => setMode('edit')}>
+              <button type="button" className="min-h-8 rounded-full px-2.5 font-medium text-muted hover:bg-surface hover:text-foreground" onClick={() => setMode('edit')}>
                 编辑
               </button>
             )}
             {!gone && (mine || viewer?.isAdmin) && (
               <button
                 type="button"
-                className="font-bold text-muted hover:text-danger"
+                className="min-h-8 rounded-full px-2.5 font-medium text-danger hover:bg-danger-soft"
                 onClick={async () => {
                   if (!confirm(mine ? '删除这条评论？' : '以管理员身份移除这条评论？')) return;
                   try {
@@ -418,7 +420,7 @@ function CommentView({
             />
           ))}
           {hidden > 0 && (
-            <button type="button" onClick={() => onMore(comment)} className="w-fit text-xs font-bold text-link hover:underline">
+            <button type="button" onClick={() => onMore(comment)} className="inline-flex min-h-8 w-fit items-center rounded-full bg-surface px-3 text-[13px] font-semibold text-link hover:bg-surface-high">
               {replies.length === 0 ? `${hidden} 条回复` : `还有 ${hidden} 条回复`}
             </button>
           )}

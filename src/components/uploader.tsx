@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
-import { Button, cx, formatBytes, Notice } from '@/components/ui';
+import { Button, cx, formatBytes, Notice, UploadIcon } from '@/components/ui';
 
 /** Sends the ZIP as the raw body of PUT /api/v1/uploads, with progress. */
 export function Uploader({ chartId, maxMb }: { chartId?: string; maxMb: number }) {
@@ -80,19 +80,22 @@ export function Uploader({ chartId, maxMb }: { chartId?: string; maxMb: number }
           pick(e.dataTransfer.files[0]);
         }}
         className={cx(
-          'flex min-h-36 flex-col items-center justify-center gap-1 rounded-[14px] border-2 border-dashed px-4 py-8 text-center transition-colors',
-          drag ? 'border-outline bg-cream' : 'border-input bg-card hover:bg-cream',
+          'flex min-h-56 flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed px-6 py-8 text-center transition-colors disabled:opacity-60',
+          drag ? 'border-primary bg-secondary' : 'border-primary/40 bg-secondary/50 hover:bg-secondary',
         )}
       >
+        <span className="grid size-16 place-items-center rounded-full bg-primary-soft text-on-primary-soft">
+          <UploadIcon className="size-7" />
+        </span>
         {file ? (
           <>
-            <span className="break-all font-bold">{file.name}</span>
-            <span className="text-xs text-muted">{formatBytes(file.size)} · 点击更换</span>
+            <span className="break-all text-[17px] font-semibold">{file.name}</span>
+            <span className="text-[13px] text-muted">{formatBytes(file.size)} · 点击更换</span>
           </>
         ) : (
           <>
-            <span className="font-bold">把 ZIP 拖到这里，或点击选择</span>
-            <span className="text-xs text-muted">上限 {maxMb} MB</span>
+            <span className="text-[17px] font-semibold">把 ZIP 拖到这里，或点击选择</span>
+            <span className="text-[13px] text-muted">OpenSekai 自制谱管理「导出ZIP」得到的文件 · 最大 {maxMb} MB</span>
           </>
         )}
       </button>
@@ -107,15 +110,29 @@ export function Uploader({ chartId, maxMb }: { chartId?: string; maxMb: number }
         }}
       />
       {busy && (
-        <div className="flex flex-col gap-1">
-          <div className="h-3 overflow-hidden rounded-full border-[1.5px] border-outline bg-card">
-            <div className="h-full bg-hero transition-[width]" style={{ width: `${Math.round((progress ?? 0) * 100)}%` }} />
+        <div className="flex items-center gap-3.5 rounded-[20px] bg-surface-low p-4 shadow-[inset_0_0_0_1px_var(--outline-variant)]">
+          <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-primary-soft text-xs font-bold text-on-primary-soft">ZIP</span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div className="flex justify-between gap-2 text-sm">
+              <span className="truncate font-semibold">{file?.name}</span>
+              <span className="text-muted tabular-nums">{Math.round((progress ?? 0) * 100)}%</span>
+            </div>
+            <div
+              role="progressbar"
+              aria-label="上传进度"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round((progress ?? 0) * 100)}
+              className="h-2 overflow-hidden rounded-full bg-surface-high"
+            >
+              <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${Math.round((progress ?? 0) * 100)}%` }} />
+            </div>
+            <span className="text-xs text-muted">{processing ? '正在检查谱面包…' : '上传中，完成后服务器会检查文件'}</span>
           </div>
-          <span className="text-xs text-muted">{processing ? '正在检查谱面包…' : `上传中 ${Math.round((progress ?? 0) * 100)}%`}</span>
         </div>
       )}
       {error && <Notice tone="error">{error}</Notice>}
-      <div>
+      <div className="flex justify-end">
         <Button type="button" onClick={upload} disabled={!file || busy}>
           {chartId ? '上传新版本' : '上传'}
         </Button>

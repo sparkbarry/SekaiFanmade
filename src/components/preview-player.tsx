@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui';
+import { Button, PlayIcon, StopIcon } from '@/components/ui';
 
 const PREVIEW_SECONDS = 20;
 
@@ -52,8 +52,9 @@ export function PreviewPlayer({ src, start }: { src: string; start: number }) {
   return (
     <>
       <audio ref={audio} src={src} preload="none" />
-      <Button variant="outline" onClick={toggle} disabled={error} aria-pressed={playing}>
-        {error ? '无法播放' : playing ? '■ 停止试听' : '▶ 试听'}
+      <Button variant="tonal" className="min-h-12 px-5 text-[15px]" onClick={toggle} disabled={error} aria-pressed={playing}>
+        {!error && (playing ? <StopIcon className="size-3.5" /> : <PlayIcon className="size-3.5" />)}
+        {error ? '无法播放' : playing ? '停止' : '试听'}
       </Button>
     </>
   );

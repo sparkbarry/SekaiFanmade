@@ -1,64 +1,137 @@
 @import 'tailwindcss';
 
-/* Same visual language as Fanmade / Database (OurTaikoLogs/Fanmade/UIDESIGN.md):
-   paper background, ink outlines, solid drop shadows. Only the brand colours differ:
-   Sekai teal instead of don red / ka teal. */
+/* Visual language after Moesekai (github.com/StarMoe-org/Moesekai): Material 3 neutral surfaces with a
+   Sekai teal accent, a light page scattered with faint shards, frosted floating navigation, white cards
+   with a hairline edge and a soft drop, pill-shaped controls. Colours follow Moesekai's default scheme. */
 
 @theme inline {
-  --font-sans: 'M PLUS Rounded 1c', 'Hiragino Maru Gothic ProN', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', system-ui, sans-serif;
+  --font-sans: var(--font-roboto-flex), Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'Noto Sans CJK SC', 'Source Han Sans SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
+  --color-foreground: var(--on-surface);
+  --color-card: var(--surface-card);
+  --color-surface: var(--surface-container);
+  --color-surface-high: var(--surface-container-high);
+  --color-surface-low: var(--surface-container-low);
+  --color-glass: var(--glass);
+  --color-muted: var(--on-surface-variant);
+  --color-border: var(--outline-variant);
   --color-outline: var(--outline);
-  --color-drop: var(--drop);
-  --color-muted: var(--muted-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-cream: var(--cream);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-primary-soft: var(--primary-soft);
+  --color-on-primary-soft: var(--on-primary-soft);
+  --color-secondary: var(--secondary-container);
+  --color-on-secondary: var(--on-secondary-container);
+  --color-tertiary: var(--tertiary-container);
+  --color-on-tertiary: var(--on-tertiary-container);
+  --color-danger: var(--error);
+  --color-danger-soft: var(--error-container);
+  --color-on-danger-soft: var(--on-error-container);
+  --color-brand: var(--brand-mark);
+  --color-up: var(--up);
+  --color-up-soft: var(--up-container);
+  --color-down: var(--down);
+  --color-down-soft: var(--down-container);
   --color-link: var(--link);
-  --color-brand: var(--brand);
-  --color-hero: var(--hero);
-  --color-pop: var(--pop);
-  --color-danger: var(--danger);
-  --shadow-press: 0 3px 0 var(--outline);
-  --shadow-press-hover: 0 5px 0 var(--outline);
-  --shadow-drop: 0 5px 0 var(--drop);
-  --shadow-drop-hover: 0 8px 0 var(--drop);
+
+  --shadow-elev-1: 0 0 0 1px var(--edge), 0 1px 2px 0 rgb(var(--ink) / 0.06), 0 4px 12px -4px rgb(var(--ink) / 0.16);
+  --shadow-elev-2: 0 0 0 1px var(--edge), 0 2px 4px -1px rgb(var(--ink) / 0.08), 0 10px 22px -8px rgb(var(--ink) / 0.22);
+  --shadow-elev-3: 0 0 0 1px var(--edge), 0 4px 8px -2px rgb(var(--ink) / 0.1), 0 16px 32px -10px rgb(var(--ink) / 0.22);
 }
 
 :root {
-  --brand: #0b7268;
-  --hero: #33ccbb;
-  --pop: #ff77aa;
-  --link: #0a6f86;
-  --cream: #fff4dc;
-  --outline: #382d2a;
-  --drop: #e6d9be;
-  --background: #fffef9;
-  --foreground: #382d2a;
-  --card: #fffefa;
-  --muted-foreground: #726761;
-  --border: #e9e2d8;
-  --input: #d5c7b7;
-  --danger: #b8302a;
+  --primary: #007e72;
+  --on-primary: #ffffff;
+  --primary-soft: #b8ece5;
+  --on-primary-soft: #00201c;
+  --secondary-container: #e2f8f5;
+  --on-secondary-container: #005d54;
+  --tertiary-container: #ebf6ff;
+  --on-tertiary-container: #005785;
+  --error: #ba1a1a;
+  --error-container: #f5dfdf;
+  --on-error-container: #98000a;
+  --background: #f4f5f6;
+  --surface-card: #ffffff;
+  --surface-container-low: #f8f9f9;
+  --surface-container: #eff0f1;
+  --surface-container-high: #e9eaec;
+  --on-surface: #17181a;
+  --on-surface-variant: #5a5e64;
+  --outline: #8a8e94;
+  --outline-variant: #dddfe2;
+  --glass: rgb(255 255 255 / 0.72);
+  --brand-mark: #33ccbb;
+  --link: #007e72;
+  --up: #b3215a;
+  --up-container: #fbd9e6;
+  --down: #0075b1;
+  --down-container: #d6ebfa;
+  --edge: rgb(23 24 26 / 0.06);
+  --ink: 0 0 0;
+  --shard-a: #33ccbb;
+  --shard-b: #ff6699;
+  --shard-c: #8a8e94;
+
+  --diff-easy-bg: #e6f6d9;
+  --diff-easy-fg: #2f6b0a;
+  --diff-normal-bg: #dff2fb;
+  --diff-normal-fg: #0b6a94;
+  --diff-hard-bg: #fff1d6;
+  --diff-hard-fg: #7a4f00;
+  --diff-expert-bg: #fde3e9;
+  --diff-expert-fg: #a81d3b;
+  --diff-master-bg: #f3e3fb;
+  --diff-master-fg: #7a1fa3;
+  --diff-append-bg: #fbe4f3;
+  --diff-append-fg: #9c2268;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --brand: #0b7268;
-    --link: #6fd6cb;
-    --cream: #2e2420;
-    --outline: #cbbcaf;
-    --drop: #0f0b0a;
-    --background: #1d1715;
-    --foreground: #f3e9dc;
-    --card: #2a2220;
-    --muted-foreground: #b7a89d;
-    --border: #3d322e;
-    --input: #5a4b44;
-    --danger: #ff8a80;
+    --primary: #33ccbb;
+    --on-primary: #17181a;
+    --primary-soft: #204240;
+    --on-primary-soft: #55e4d2;
+    --secondary-container: #204240;
+    --on-secondary-container: #55e4d2;
+    --tertiary-container: #2c3f4f;
+    --on-tertiary-container: #abd6ff;
+    --error: #ff897d;
+    --error-container: #4c3332;
+    --on-error-container: #ffbcb3;
+    --background: #121314;
+    --surface-card: #1a1b1d;
+    --surface-container-low: #1a1b1d;
+    --surface-container: #1f2023;
+    --surface-container-high: #27292b;
+    --on-surface: #eceef0;
+    --on-surface-variant: #a5a8ad;
+    --outline: #6c7076;
+    --outline-variant: #2e3033;
+    --glass: rgb(26 27 29 / 0.72);
+    --link: #55e4d2;
+    --up: #ff8fb8;
+    --up-container: #4a2233;
+    --down: #8cc8ff;
+    --down-container: #1f3446;
+    --edge: rgb(255 255 255 / 0.07);
+
+    --diff-easy-bg: #23331a;
+    --diff-easy-fg: #a6e57a;
+    --diff-normal-bg: #16303d;
+    --diff-normal-fg: #8fd6f7;
+    --diff-hard-bg: #3a2e14;
+    --diff-hard-fg: #ffcf73;
+    --diff-expert-bg: #3f1d26;
+    --diff-expert-fg: #ff9fb3;
+    --diff-master-bg: #33203f;
+    --diff-master-fg: #dca2f7;
+    --diff-append-bg: #3b1f33;
+    --diff-append-fg: #f6a8dd;
     color-scheme: dark;
   }
 }
@@ -70,25 +143,24 @@
 
   body {
     background: var(--background);
-    color: var(--foreground);
+    color: var(--on-surface);
     font-family: var(--font-sans);
   }
 
   :focus-visible {
-    outline: 2px solid var(--link);
+    outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
 }
 
-.hero-stripe {
-  background: repeating-linear-gradient(
-    -45deg,
-    var(--hero) 0 14px,
-    color-mix(in srgb, var(--hero) 70%, white) 14px 28px
-  );
+/* The word under a page title that gets a highlighter stroke, as on Moesekai's page headers. */
+.title-mark {
+  background: linear-gradient(transparent 62%, var(--primary-soft) 62%);
 }
 
-.sekai-stripe {
-  height: 6px;
-  background: linear-gradient(90deg, var(--hero) 0 50%, var(--pop) 50% 100%);
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
