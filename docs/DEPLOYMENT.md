@@ -131,3 +131,9 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 核对：首页（默认热门）、`?sort=top`、谱面页、`/readyz` 200，`/charts/1` 307；`hot`、`popular`、`plays` 列表与评论列表 200，返回 `score`／`upvotes`／`downvotes`、不再有 `likeCount`；旧的 `/like` 404；未登录投票 401，伪造 Origin 403。网页上赞踩与评论按钮正常显示（未登录）。
 - 旧版游戏仍能浏览、下载、排序，但喜欢数显示 0、点喜欢会报错，直到用上 `reddit-votes` 的版本。
 - 没有验证：没用真实账号在生产上投票、评论（本地开发库与游戏 Editor 全部走通过）。
+
+### 2026-11-09 界面改版（`9899bcb`）
+
+- 内容：仿 Moesekai 的 Material 3 风格（浮动侧栏、顶栏面包屑与搜索、白卡片、青绿强调色、背景碎片），跟随系统深浅色；谱面页加マイリスト按钮，自己的用户页加マイリスト页签。Roboto Flex 用 next/font 在构建时打包，访客不连 Google。没有数据库迁移，接口未变。
+- 核对：首页、`?sort=top`、谱面页、上传页、`/readyz`、`/api/v1/charts` 200，`/charts/1` 307，下载 302；字体从 `/_next/static/media/*.woff2` 自站提供（`font/woff2`），页面不再引用 `fonts.googleapis.com`；容器日志无错误。未登录状态下看过首页与谱面页。
+- 本机看过：桌面宽、375 px 手机宽（含菜单）、深色；マイリスト按钮加入后出现在マイリスト页签。没有在生产上登录操作。
