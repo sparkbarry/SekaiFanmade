@@ -137,3 +137,9 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 内容：仿 Moesekai 的 Material 3 风格（浮动侧栏、顶栏面包屑与搜索、白卡片、青绿强调色、背景碎片），跟随系统深浅色；谱面页加マイリスト按钮，自己的用户页加マイリスト页签。Roboto Flex 用 next/font 在构建时打包，访客不连 Google。没有数据库迁移，接口未变。
 - 核对：首页、`?sort=top`、谱面页、上传页、`/readyz`、`/api/v1/charts` 200，`/charts/1` 307，下载 302；字体从 `/_next/static/media/*.woff2` 自站提供（`font/woff2`），页面不再引用 `fonts.googleapis.com`；容器日志无错误。未登录状态下看过首页与谱面页。
 - 本机看过：桌面宽、375 px 手机宽（含菜单）、深色；マイリスト按钮加入后出现在マイリスト页签。没有在生产上登录操作。
+
+### 2026-11-09 游戏内上传（`e3fa317`）
+
+- 内容：`PUT /api/v1/uploads` 改用 `requireApiViewer`：游戏会话（Bearer）或本站 Cookie（检查 Origin）。游戏端是 OpenSekai 分支 `community-upload`（`8d382a0`），自制谱管理的「上传」按钮。没有数据库迁移。
+- 核对：伪造的 Bearer 令牌 401 `AUTH_REQUIRED`（说明走了游戏会话校验），外站 Origin 403；首页、上传页、`/readyz`、谱面列表 200；容器日志无错误。
+- 本机开发库走通过：首次上传建新谱面，再上传带 `?chart=` 替换同一份（版本 2）。没有在生产上用真实账号从游戏上传。
