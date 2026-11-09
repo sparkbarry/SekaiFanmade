@@ -90,3 +90,13 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 用户随后加了 DNS（灰云）、在 1Panel 建了静态站点并签了 Let's Encrypt 证书（2027-02-07 到期）。我备份站点配置为同目录 `sekai.ourtaiko.org.conf.before-include-<时间>`，在 `root` 下一行加 include，放 `sekai.conf`，`openresty -t` 通过后 reload。公网核对：首页、`/readyz`、`/api/v1/charts`、`/upload` 200，HTTP 301 到 HTTPS，`/auth/login` 303 到 SSO（回调正确），未登录上传 401；fanmade、database、profile 200，sso 302（登录页），与之前相同。
 - 用户建了 IAM 用户 `sekai-fanmade`（内联策略同上）并把密钥填进 `app.env`、重启了容器。核对：容器内两个变量长度 20／40；从容器里经应用自己的 S3 客户端写一个临时对象 `sekai-fanmade/__healthcheck/…` 成功，经 `distrib.ourtaiko.org` 读回 200、内容一致、`Access-Control-Allow-Origin: *`，随后删除成功；往 `database/` 写被拒（AccessDenied），权限没有超出前缀。CloudFront 现在走的是默认行为，没有单独的 `sekai-fanmade/*` 行为。
 - 还没做：`ADMIN_USER_IDS`；生产上还没用真实账号登录或上传过。
+
+### 2026-11-09 游戏接口（`32eb96d`，迁移 0001）
+
+- 内容：游戏用的 API（游玩次数、每日／总排行、おすすめ、标签、二次利用OK、親譜面、マイリスト、游戏令牌登录）与 JPEG 封面。游戏端是 OpenSekai `136f60f`（Home 与 CommunityCharts 场景）。
+- 发布前：库里 1 首谱面、1 个用户，迁移 1 条，无 `idle in transaction`。备份 `/var/backups/sekai-fanmade/pre-0001-20261109T044734Z.dump`（root 600，`pg_restore --list` 正常）。
+- `deploy/release.sh` 发布，容器 healthy，迁移变 2 条，新表 `chart_plays`、`bookmarks` 和新列都在，原谱面数据不变。
+- `docker exec sekai-fanmade node scripts/backfill-jpeg-jackets.mjs`：谱面 1 的封面 `jacket.webp` → `jacket.jpg`（19 KB），旧对象已删。经 CDN 读回 200 `image/jpeg`。
+- SSO：`sekai-fanmade-prod` 原本没有 ApplicationAccess 记录，新建并打开 `allow_game`（允许游戏登录和会话接口）、`allow_account_tokens`（允许游戏账号换取本应用的游戏会话），其余开关保持关闭。
+- 核对：`/api/v1/meta` 指向生产 SSO；六种排序与 `/api/v1/tags` 200；伪造的游戏令牌 401 `AUTH_REQUIRED`（说明本站用 Application 凭据调 introspect 正常，权限不足时会是 503）；SSO `/api/v1/game/tokens` 对伪造账号令牌 401；fanmade、database、profile 200，sso 302，与之前相同。
+- 没有验证：没用真实账号在游戏里登录生产、点喜欢、登録或报游玩次数（本地开发环境全部走通过）。
