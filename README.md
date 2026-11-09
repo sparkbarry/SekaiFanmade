@@ -41,7 +41,7 @@ OIDC 授权码 + S256 PKCE，confidential client（HTTP Basic），scope `openid
 - 会话：Cookie 里是随机令牌，数据库只存其 SHA-256；上游 access / refresh token 用 `SESSION_ENCRYPTION_KEY` 做 AES-256-GCM 加密。会话最长 `SESSION_DAYS` 天（默认 7），不因活动延长。
 - 每 `SESSION_RECHECK_SECONDS` 秒（默认 60）用 UserInfo 复核一次，顺带更新昵称和头像；access token 快过期时用 refresh token 轮换（行锁串行）。SSO 说 token 无效就删会话；SSO 不可达时页面照常显示，写操作返回 503。
 - 退出只退出本站，并撤销本站持有的 token。SSO 的发现文档没有列出 `revocation_endpoint`，代码里补成 `/o/revoke/`。
-- 写操作：server actions 由 Next.js 检查 Origin；`PUT /api/v1/uploads` 和 `POST /auth/logout` 自己检查 `Origin` 等于 `APP_ORIGIN`。
+- 写操作：server actions 由 Next.js 检查 Origin；`POST /auth/logout` 自己检查 `Origin` 等于 `APP_ORIGIN`；`/api/v1/*` 的写接口用 Cookie 时同样检查，用游戏会话（Bearer）时不检查。
 - 管理员：`ADMIN_USER_IDS` 里的 SSO 用户 ID，可以管理所有谱面和评论。
 
 ## 赞踩与评论
@@ -71,7 +71,7 @@ OIDC 授权码 + S256 PKCE，confidential client（HTTP Basic），scope `openid
 | `GET`／`PATCH`／`DELETE /api/v1/comments/<id>` | 单条评论及其回复；编辑 `{ body }`；删除 |
 | `PUT /api/v1/comments/<id>/vote` | `{ value }` → `{ score, myVote }` |
 | `GET /api/v1/me`、`/api/v1/me/bookmarks`、`/api/v1/tags` | 当前用户、收藏列表、标签 |
-| `PUT /api/v1/uploads` | 上传谱面包（网站用） |
+| `PUT /api/v1/uploads?chart=` | 上传谱面包（原始 ZIP 作为请求体；带 `chart` 时替换自己的这份谱面）。网站和游戏的「自制谱管理 › 上传」都用它 |
 | `GET /charts/<id 或 numberId>/download` | 计一次下载，302 到 CDN 上的 ZIP |
 | `GET /readyz` | 健康检查 |
 

@@ -8,21 +8,21 @@ import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { createChart, replaceChart } from '@/lib/charts';
 import { env } from '@/lib/env';
-import { assertSameOrigin, BadRequest, errorResponse } from '@/lib/http';
-import { requireViewer } from '@/lib/session';
+import { requireApiViewer } from '@/lib/game-auth';
+import { BadRequest, errorResponse } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
  * PUT the raw ZIP as the request body. `?chart=<id>` replaces that chart's package;
- * without it a new chart is created. The browser sends the file directly (no multipart).
+ * without it a new chart is created. The browser sends the file directly (no multipart); the game
+ * (自制谱管理 › 上传) sends it with its game session as a Bearer token.
  */
 export async function PUT(request: Request) {
   const dir = await mkdtemp(path.join(env().TMP_DIR ?? os.tmpdir(), 'sekai-upload-'));
   try {
-    assertSameOrigin(request);
-    const viewer = await requireViewer();
+    const viewer = await requireApiViewer(request);
     const max = env().UPLOAD_MAX_MB * 1024 * 1024;
     const declared = Number(request.headers.get('content-length') ?? '0');
     if (declared > max) throw new BadRequest(`文件太大（上限 ${env().UPLOAD_MAX_MB} MB）。`);
