@@ -115,4 +115,10 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 发布后：迁移 3 条；启动任务 `moved chart 1 (35300290027345d2a997e81dcc247e78)`，`{ moved: 1, cleared: 0, failed: 0 }`。`files` 3 行（zip 7565962、ogg 7146133、jpg 19024 字节），`retired_objects` 0。桶内 `sekai-fanmade/` 只剩这 3 个对象，旧键已删。
 - 核对：经 CDN 下载 3 个对象的 SHA-256 与键名一致；ZIP 的 Content-Disposition 是「言って。 [MASTER 30].zip」，`immutable` 一年缓存，CORS `*`；`/api/v1/charts/1` 与按 id 都 200，`/charts/1` 307 到 id 网址，`/charts/1/download` 302 到哈希 ZIP，`#1` 搜得到；伪造游戏令牌 401；fanmade、database、profile 200，sso 302。
 - 旧键 `charts/1/r1/package.zip` 经 CDN 仍是 200：CloudFront 边缘缓存（旧对象带一年缓存头），S3 上已删。没有地方再引用它；要立即清掉需在 CloudFront 对 `/sekai-fanmade/charts/*` 做 invalidation（本站 IAM 用户没有这个权限）。
-- 还没做：删除旧列 `package_key`、`package_size`、`package_sha256`、`audio_key`、`jacket_key` 的后续迁移；没用真实账号在游戏里对新版本登录、下载、游玩。
+- 还没做：没用真实账号在游戏里对新版本登录、下载、游玩。
+
+### 2026-11-09 删除旧存储列（`47b29d5`，迁移 0003）
+
+- 发布前：没有「未删除却没有文件」的谱面（0 行），1 首谱面、3 个文件，迁移 3 条。备份 `/var/backups/sekai-fanmade/pre-0003-20261109T051942Z.dump`（root 600，`pg_restore --list` 正常）。
+- 0003 先检查没有谱面还靠旧键（否则报错、整个迁移回滚），再删 `package_key`、`package_size`、`package_sha256`、`audio_key`、`jacket_key`，加 `charts_files_check`。启动搬迁任务 `legacy-files.ts` 一并删除。
+- 发布后：迁移 4 条，旧列不在，约束存在；谱面 1 的 id、大小、哈希 ZIP 不变，`/charts/1` 307、下载 302、`/readyz` 200；相邻站点不变。
