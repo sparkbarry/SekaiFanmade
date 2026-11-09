@@ -149,5 +149,5 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 内容：不再保存 ZIP。谱面、音频、原始封面、MV 各自按哈希存放，manifest 存在 `charts.manifest`；游戏下载各文件后组装导入，网站用 JSZip 在浏览器里打包；`POST /api/v1/charts/<id>/downloads` 计数，`/charts/<id>/download` 改为 302 到谱面页。游戏端是 OpenSekai 分支 `chart-parts`（`644c829`）。
 - 发布前：1 首谱面、3 个文件，迁移 5 条，无 `idle in transaction`。备份 `/var/backups/sekai-fanmade/pre-0005-20261109T065811Z.dump`（root 600，`pg_restore --list` 正常）。
 - 发布后：迁移 6 条；启动任务 `split chart 1 … released 7804caf1….zip`，`{ split: 1, failed: 0 }`。谱面 1 引用 score 4（`.json` 1417721）、audio 2（`.ogg`，原对象复用）、缩略图 5（重新编码，新对象）、原始封面 6（`.png` 340622），`package_size` 8905103；`retired_objects` 0，ZIP 的 S3 对象已删（CloudFront 边缘缓存仍可能返回它）。
-- 遗留：拆分时缩略图重新编码成了不同的字节，旧缩略图 3（`2b2d67b0….jpg`，19 KB）没有谱面引用但还在桶里。修复在 `bcd13fd`（拆分时一并释放旧音频和缩略图，后台任务释放一小时以上无人引用的文件），尚未发布。
+- 遗留：拆分时缩略图重新编码成了不同的字节，旧缩略图 3（`2b2d67b0….jpg`，19 KB）没有谱面引用但还在桶里。修复在 `bcd13fd`（拆分时一并释放旧音频和缩略图，后台任务释放一小时以上无人引用的文件），随 `bab8e4a` 发布：启动后 `released 1 file(s) no chart refers to`，文件 3 的行和 S3 对象已删，`retired_objects` 0；`/readyz`、谱面页 200。
 - 核对：谱面接口列出 3 个文件，经 CDN 都 200 且带 `Access-Control-Allow-Origin: *`；首页、谱面页、列表、`/readyz` 200，旧下载地址 302；网页「下载 ZIP」在浏览器里生成 `言って。 [MASTER 30].zip`（manifest、score 压缩，音频、封面存储），这次测试计了 1 次下载。
