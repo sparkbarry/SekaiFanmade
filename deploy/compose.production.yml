@@ -1,0 +1,24 @@
+# Copied to /opt/sekai-fanmade/compose.yml on ourtaiko-prod by deploy/publish.sh.
+name: sekai-fanmade
+services:
+  web:
+    image: sekai-fanmade:release
+    container_name: sekai-fanmade
+    restart: unless-stopped
+    env_file:
+      - path: /etc/sekai-fanmade/app.env
+        format: raw
+    ports: ['127.0.0.1:8094:3000']
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g
+      - /app/.next/cache:rw,noexec,nosuid,size=64m
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 768m
+    networks: [shared]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+networks:
+  shared: {external: true, name: ourtaiko-shared}

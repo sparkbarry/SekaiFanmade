@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+
+/* Same visual language as Fanmade / Database (OurTaikoLogs/Fanmade/UIDESIGN.md):
+   paper background, ink outlines, solid drop shadows. Only the brand colours differ:
+   Sekai teal instead of don red / ka teal. */
+
+@theme inline {
+  --font-sans: 'M PLUS Rounded 1c', 'Hiragino Maru Gothic ProN', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', system-ui, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-outline: var(--outline);
+  --color-drop: var(--drop);
+  --color-muted: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-cream: var(--cream);
+  --color-link: var(--link);
+  --color-brand: var(--brand);
+  --color-hero: var(--hero);
+  --color-pop: var(--pop);
+  --color-danger: var(--danger);
+  --shadow-press: 0 3px 0 var(--outline);
+  --shadow-press-hover: 0 5px 0 var(--outline);
+  --shadow-drop: 0 5px 0 var(--drop);
+  --shadow-drop-hover: 0 8px 0 var(--drop);
+}
+
+:root {
+  --brand: #0b7268;
+  --hero: #33ccbb;
+  --pop: #ff77aa;
+  --link: #0a6f86;
+  --cream: #fff4dc;
+  --outline: #382d2a;
+  --drop: #e6d9be;
+  --background: #fffef9;
+  --foreground: #382d2a;
+  --card: #fffefa;
+  --muted-foreground: #726761;
+  --border: #e9e2d8;
+  --input: #d5c7b7;
+  --danger: #b8302a;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand: #0b7268;
+    --link: #6fd6cb;
+    --cream: #2e2420;
+    --outline: #cbbcaf;
+    --drop: #0f0b0a;
+    --background: #1d1715;
+    --foreground: #f3e9dc;
+    --card: #2a2220;
+    --muted-foreground: #b7a89d;
+    --border: #3d322e;
+    --input: #5a4b44;
+    --danger: #ff8a80;
+    color-scheme: dark;
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+  }
+}
+
+.hero-stripe {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--hero) 0 14px,
+    color-mix(in srgb, var(--hero) 70%, white) 14px 28px
+  );
+}
+
+.sekai-stripe {
+  height: 6px;
+  background: linear-gradient(90deg, var(--hero) 0 50%, var(--pop) 50% 100%);
+}
