@@ -161,3 +161,11 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 内容：删除 `charts.package_file_id` 和拆分任务；`charts_files_check` 改为没删除的谱面必须有 `score_file_id`、`audio_file_id`、`manifest`。迁移开头检查仍有 ZIP 的谱面，有就报错回滚。
 - 发布前：`package_file_id` 非空的谱面 0，共 1 首，迁移 6 条。备份 `/var/backups/sekai-fanmade/pre-0006-20261109T071223Z.dump`（root 600，`pg_restore --list` 正常）。
 - 发布后：迁移 7 条，列已不在，新约束生效；`files` 4 行，`retired_objects` 0；日志无错误。首页、谱面页、上传页、列表、`/readyz` 200，谱面接口仍列出 score、audio、jacket 三个文件。
+
+### 2026-11-09 協力ライブ（`c8b304d`，分支 `coop-live`）
+
+- 内容：网站进程里的 gRPC 服务 `sekai.multiplay.v1.MultiLive`（见 README「協力ライブ」），容器端口 3001 映射 `127.0.0.1:8095`；`/api/v1/meta` 新增 `multiplay`。没有数据库迁移，没有备份。游戏端是 OpenSekai 分支 `coop-live`（`528debc`），需要 YetAnotherHttpHandler。
+- 发布：`deploy/release.sh`，镜像 82 MB，容器 healthy，日志 `co-op live gRPC on 0.0.0.0:3001`，`docker port` 显示 `3001/tcp -> 127.0.0.1:8095`。
+- 反向代理：站点 443 已经是 `http2 on;`，不用改。服务器上的 `/opt/1panel/www/sites/sekai.ourtaiko.org/sekai.conf`（容器内 `/www/sites/…`）与上一版仓库文件一致，备份为同目录 `sekai.conf.before-coop-20261109T080743Z`，换成新的 `deploy/sekai.locations.conf`，`openresty -t` 通过后 reload。
+- 核对：从外网经 `sekai.ourtaiko.org:443`（TLS + HTTP/2）调 `Connect`：不带令牌返回 `UNAUTHENTICATED AUTH_REQUIRED`；伪造的 64 位令牌同样 `UNAUTHENTICATED`（约 0.8 s，说明向生产 SSO introspect 正常，不是 `UNAVAILABLE`）。`/api/v1/meta` 的 `multiplay.url` 是 `https://sekai.ourtaiko.org`。首页、`/readyz`、`/api/v1/charts` 200；fanmade、database、profile 200，sso 302，与之前相同。
+- 没有验证：没用真实账号在生产上开房间、打一局；游戏还没发布带協力ライブ的版本。本地（游戏 + 脚本玩家，本地 SSO）完整走通过一局。
