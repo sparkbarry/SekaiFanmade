@@ -122,3 +122,12 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - 发布前：没有「未删除却没有文件」的谱面（0 行），1 首谱面、3 个文件，迁移 3 条。备份 `/var/backups/sekai-fanmade/pre-0003-20261109T051942Z.dump`（root 600，`pg_restore --list` 正常）。
 - 0003 先检查没有谱面还靠旧键（否则报错、整个迁移回滚），再删 `package_key`、`package_size`、`package_sha256`、`audio_key`、`jacket_key`，加 `charts_files_check`。启动搬迁任务 `legacy-files.ts` 一并删除。
 - 发布后：迁移 4 条，旧列不在，约束存在；谱面 1 的 id、大小、哈希 ZIP 不变，`/charts/1` 307、下载 302、`/readyz` 200；相邻站点不变。
+
+### 2026-11-09 Reddit 式赞踩与评论（`b24ec0c`，迁移 0004）
+
+- 内容：谱面和评论的赞踩、楼中楼评论（五种排序、编辑、删除占位、折叠）、karma；`hot` 为 Reddit hot，`top` 为得分（见 README「赞踩与评论」）。游戏端是 OpenSekai 分支 `reddit-votes`（`325c91e`、`778e5e4`）：▲／▼ 按钮，おすすめ・人気 用 `hot`，ランキング 総合 用 `top`。
+- 发布前：1 首谱面、1 个用户、0 个喜欢、0 条评论，迁移 4 条，无 `idle in transaction`。备份 `/var/backups/sekai-fanmade/pre-0004-20261109T054202Z.dump`（root 600，`pg_restore --list` 正常）。
+- 发布后：迁移 5 条；`chart_likes` 已删，`chart_votes`、`comment_votes` 与函数 `comment_confidence`、`comment_controversy` 存在；谱面 1 得分 0、评论 0。
+- 核对：首页（默认热门）、`?sort=top`、谱面页、`/readyz` 200，`/charts/1` 307；`hot`、`popular`、`plays` 列表与评论列表 200，返回 `score`／`upvotes`／`downvotes`、不再有 `likeCount`；旧的 `/like` 404；未登录投票 401，伪造 Origin 403。网页上赞踩与评论按钮正常显示（未登录）。
+- 旧版游戏仍能浏览、下载、排序，但喜欢数显示 0、点喜欢会报错，直到用上 `reddit-votes` 的版本。
+- 没有验证：没用真实账号在生产上投票、评论（本地开发库与游戏 Editor 全部走通过）。
