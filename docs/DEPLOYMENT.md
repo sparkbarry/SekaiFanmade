@@ -11,6 +11,7 @@
 | 目录 | `/opt/sekai-fanmade/`：`compose.yml`、`publish.sh`、`incoming/`（镜像包，发布成功后删除） |
 | 环境 | `/etc/sekai-fanmade/app.env`（root，600），字段见 `deploy/app.env.example` |
 | 数据库 | 共享实例 `ourtaiko-postgres`（PostgreSQL 18.6）里的库 `sekai_fanmade`，属主角色 `sekai_fanmade`；容器内经别名 `postgres:5432` 连接。迁移在容器启动时自动执行 |
+| 查看数据 | CloudBeaver（https://postgre.ourtaiko.org）连接「Sekai Fanmade Production (read only)」，账号是共享只读角色 `ourtaiko_viewer`：能读除 `sessions` 外的所有表（默认权限覆盖以后的新表），不能写 |
 | 文件 | 桶 `ourtaiko-public`（ap-northeast-1）的 `sekai-fanmade/` 前缀；CloudFront `https://distrib.ourtaiko.org/sekai-fanmade/…`；IAM 用户 `sekai-fanmade` 只能读写该前缀 |
 | SSO 应用 | OAuth Application `sekai-fanmade-prod`（confidential、authorization code、RS256、不跳过授权），回调 `https://sekai.ourtaiko.org/auth/callback` |
 
@@ -100,3 +101,9 @@ ssh ourtaiko-prod 'sudo docker tag sekai-fanmade:previous sekai-fanmade:release 
 - SSO：`sekai-fanmade-prod` 原本没有 ApplicationAccess 记录，新建并打开 `allow_game`（允许游戏登录和会话接口）、`allow_account_tokens`（允许游戏账号换取本应用的游戏会话），其余开关保持关闭。
 - 核对：`/api/v1/meta` 指向生产 SSO；六种排序与 `/api/v1/tags` 200；伪造的游戏令牌 401 `AUTH_REQUIRED`（说明本站用 Application 凭据调 introspect 正常，权限不足时会是 503）；SSO `/api/v1/game/tokens` 对伪造账号令牌 401；fanmade、database、profile 200，sso 302，与之前相同。
 - 没有验证：没用真实账号在游戏里登录生产、点喜欢、登録或报游玩次数（本地开发环境全部走通过）。
+
+### 2026-11-09 CloudBeaver 只读连接
+
+- 给 `ourtaiko_viewer` 授 `sekai_fanmade` 的 CONNECT、`public` 与 `drizzle` 的 USAGE 和全部表的 SELECT，撤掉 `sessions`；`ALTER DEFAULT PRIVILEGES FOR ROLE sekai_fanmade` 让以后新建的表也可读。
+- CloudBeaver：停容器，备份 `data-sources.json` 为 `data-sources.json.before-sekai-fanmade-20261109T045923Z`，复制 Fanmade 只读连接的配置（同一账号与已保存的密码）新增 `postgres-jdbc-sekai_fanmade`，重启后 `/status` 200。服务器 README 已补一行。
+- 核对：用该账号连库能读 `charts`、`users`；读 `sessions` 被拒；UPDATE 报只读事务。没有登录 CloudBeaver 网页界面查看。
