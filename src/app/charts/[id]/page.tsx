@@ -80,13 +80,13 @@ export default async function ChartPage({ params }: { params: Params }) {
             </Link>
           )}
         </div>
-        <h1 className="break-words text-[26px] leading-9 font-semibold sm:text-[32px] sm:leading-10">{chart.scoreTitle}</h1>
+        <h1 className="font-semibold text-[26px] sm:text-[32px] break-words leading-9 sm:leading-10">{chart.scoreTitle}</h1>
         {(chart.scoreTitle !== chart.title || artists) && (
-          <p className="text-base text-muted">
+          <p className="text-muted text-base">
             {[chart.scoreTitle !== chart.title ? chart.title : null, artists].filter(Boolean).join(' · ')}
           </p>
         )}
-        <Link href={`/users/${chart.uploader.id}`} className="mt-1 flex w-fit items-center gap-2 rounded-full py-1 pr-3 text-sm hover:bg-card">
+        <Link href={`/users/${chart.uploader.id}`} className="flex items-center gap-2 hover:bg-card mt-1 py-1 pr-3 rounded-full w-fit text-sm">
           <Avatar src={chart.uploader.avatarUrl} name={chart.uploader.nickname} size={28} />
           <span>
             <span className="text-muted">谱师</span> <span className="font-semibold">{chart.uploader.nickname}</span>
@@ -98,7 +98,7 @@ export default async function ChartPage({ params }: { params: Params }) {
               <Link
                 key={t}
                 href={`/?tag=${encodeURIComponent(t)}`}
-                className="inline-flex min-h-8 items-center rounded-full bg-card px-3 text-[13px] font-semibold text-muted shadow-elev-1 hover:text-foreground"
+                className="inline-flex items-center bg-card shadow-elev-1 px-3 rounded-full min-h-8 font-semibold text-[13px] text-muted hover:text-foreground"
               >
                 # {t}
               </Link>
@@ -107,9 +107,9 @@ export default async function ChartPage({ params }: { params: Params }) {
         )}
       </header>
 
-      <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-        <section aria-label="封面与操作" className="flex flex-col gap-4 rounded-[28px] bg-card p-4 shadow-elev-2">
-          <div className="overflow-hidden rounded-[20px]">
+      <div className="items-start gap-5 grid md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+        <section aria-label="封面与操作" className="flex flex-col gap-4 bg-card shadow-elev-2 p-4 rounded-[28px]">
+          <div className="rounded-[20px] overflow-hidden">
             <Jacket url={chart.jacketUrl} title={chart.title} difficulty={chart.difficulty} />
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -123,21 +123,18 @@ export default async function ChartPage({ params }: { params: Params }) {
               </ButtonLink>
             )}
           </div>
-          <Notice>
-            在 OpenSekai 的「自制谱管理」里点「新建谱面」→「导入 ZIP / 文件夹」，选下载的 ZIP 即可游玩。游戏的「在线谱面」也能直接下载。
-          </Notice>
         </section>
 
-        <section aria-labelledby="info-title" className="overflow-hidden rounded-[28px] bg-card shadow-elev-2">
-          <h2 id="info-title" className="flex items-center gap-2.5 border-b border-border px-5 py-4 text-lg font-semibold sm:px-6">
+        <section aria-labelledby="info-title" className="bg-card shadow-elev-2 rounded-[28px] overflow-hidden">
+          <h2 id="info-title" className="flex items-center gap-2.5 px-5 sm:px-6 py-4 border-border border-b font-semibold text-lg">
             <InfoIcon className="size-5 text-primary" />
             谱面信息
           </h2>
           <dl>
             {info.map(([k, v]) => (
-              <div key={k} className="flex justify-between gap-4 border-b border-surface px-5 py-3 text-sm last:border-b-0 sm:px-6">
-                <dt className="shrink-0 text-muted">{k}</dt>
-                <dd className="min-w-0 break-words text-right font-semibold">{v}</dd>
+              <div key={k} className="flex justify-between gap-4 px-5 sm:px-6 py-3 border-surface border-b last:border-b-0 text-sm">
+                <dt className="text-muted shrink-0">{k}</dt>
+                <dd className="min-w-0 font-semibold text-right break-words">{v}</dd>
               </div>
             ))}
           </dl>
@@ -146,9 +143,9 @@ export default async function ChartPage({ params }: { params: Params }) {
 
       <Section title="简介">
         {chart.description ? (
-          <p className="whitespace-pre-wrap break-words text-sm leading-6">{chart.description}</p>
+          <p className="text-sm break-words leading-6 whitespace-pre-wrap">{chart.description}</p>
         ) : (
-          <p className="text-sm text-muted">谱师还没有写简介。</p>
+          <p className="text-muted text-sm">谱师还没有写简介。</p>
         )}
       </Section>
 
