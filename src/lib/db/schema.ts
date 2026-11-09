@@ -91,6 +91,8 @@ export const charts = pgTable(
     arranger: text().notNull().default(''),
     singer: text().notNull().default(''),
     collaborationLabel: text().notNull().default(''),
+    /** 谱师署名: manifest.json's noteDesigner, the credit the charter chose (userName is the game's local name). */
+    noteDesigner: text().notNull().default(''),
     description: text().notNull().default(''),
     difficulty: text().$type<Difficulty>().notNull(),
     playLevel: integer().notNull(),

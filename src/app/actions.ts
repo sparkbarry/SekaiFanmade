@@ -34,6 +34,7 @@ export async function saveChartInfoAction(_prev: ActionState, form: FormData): P
     const parentRaw = String(form.get('parentChart') ?? '').trim();
     if (parentRaw && !parseChartRef(parentRaw)) throw new PackageError('親譜面要填谱面编号。');
     await updateChartInfo(viewer, id, {
+      noteDesigner: String(form.get('noteDesigner') ?? ''),
       description: String(form.get('description') ?? ''),
       tags: String(form.get('tags') ?? '').split(/[,，、\n]/),
       allowDerivative: form.get('allowDerivative') === 'on',

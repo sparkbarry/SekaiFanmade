@@ -64,6 +64,7 @@ const chartColumns = {
   arranger: charts.arranger,
   singer: charts.singer,
   collaborationLabel: charts.collaborationLabel,
+  noteDesigner: charts.noteDesigner,
   description: charts.description,
   difficulty: charts.difficulty,
   playLevel: charts.playLevel,
@@ -112,6 +113,8 @@ export interface ChartSummary {
   arranger: string;
   singer: string;
   collaborationLabel: string;
+  /** 谱师署名 (manifest noteDesigner); empty when the chart has none. */
+  noteDesigner: string;
   description: string;
   difficulty: Difficulty;
   playLevel: number;
@@ -195,6 +198,7 @@ function toSummary(r: ChartRow, withPackage = false): ChartSummary {
     arranger: r.arranger,
     singer: r.singer,
     collaborationLabel: r.collaborationLabel,
+    noteDesigner: r.noteDesigner,
     description: r.description,
     difficulty: r.difficulty,
     playLevel: r.playLevel,
@@ -267,6 +271,7 @@ export async function listCharts(query: ListQuery): Promise<{ items: ChartSummar
         ilike(charts.singer, like),
         ilike(charts.arranger, like),
         ilike(charts.lyricist, like),
+        ilike(charts.noteDesigner, like),
         ilike(users.nickname, like),
         ...(ref ? [refCondition(ref)] : []),
       )!,
@@ -447,6 +452,7 @@ function metadataFrom(parsed: ParsedPackage) {
     arranger: m.arranger.slice(0, 200),
     singer: m.singer.slice(0, 200),
     collaborationLabel: m.collaborationLabel.slice(0, 200),
+    noteDesigner: m.noteDesigner.slice(0, 200),
     difficulty: m.musicDifficultyType,
     playLevel: m.playLevel,
     previewStartSec: m.previewStartTimeSec,
@@ -526,6 +532,8 @@ export async function replaceChart(viewer: Viewer, chartId: string, zipPath: str
 }
 
 export interface ChartInfoUpdate {
+  /** 谱师署名; also written into the stored manifest, so later downloads carry it. */
+  noteDesigner: string;
   description: string;
   tags: string[];
   allowDerivative: boolean;
@@ -552,9 +560,12 @@ export async function updateChartInfo(viewer: Viewer, chartId: string, info: Cha
     if (found.id === row.id) throw new PackageError('親譜面不能是这份谱面自己。');
     parent = found.id;
   }
+  const noteDesigner = info.noteDesigner.trim().slice(0, 200);
   await db()
     .update(charts)
     .set({
+      noteDesigner,
+      manifest: sql`${charts.manifest} || jsonb_build_object('noteDesigner', ${noteDesigner}::text)`,
       description: info.description.slice(0, 2000),
       tags: normalizeTags(info.tags),
       allowDerivative: info.allowDerivative,

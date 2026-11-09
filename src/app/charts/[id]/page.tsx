@@ -55,6 +55,7 @@ export default async function ChartPage({ params }: { params: Params }) {
       ['作词', chart.lyricist],
       ['编曲', chart.arranger],
       ['合作', chart.collaborationLabel],
+      ['谱师', chart.noteDesigner],
       ['上传', formatDate(chart.createdAt)],
       ['更新', chart.revision > 1 ? `${formatDate(chart.updatedAt)}（第 ${chart.revision} 版）` : ''],
       ['大小', formatBytes(chart.packageSize)],

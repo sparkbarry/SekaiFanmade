@@ -146,6 +146,11 @@ describe('normalizeManifest', () => {
     expect(() => normalizeManifest({ playLevel: 120 })).toThrow(PackageError);
   });
 
+  it('reads the 谱师署名 and defaults it to empty', () => {
+    expect(normalizeManifest({ noteDesigner: '  someone  ' }).noteDesigner).toBe('someone');
+    expect(normalizeManifest({}).noteDesigner).toBe('');
+  });
+
   it('keeps fields it does not know about', () => {
     expect(normalizeManifest({ secForMusicScoreMaker: 120 }).secForMusicScoreMaker).toBe(120);
   });

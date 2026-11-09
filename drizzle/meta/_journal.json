@@ -50,6 +50,13 @@
       "when": 1794208300624,
       "tag": "0006_drop_package_zip",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794245730832,
+      "tag": "0007_note_designer",
+      "breakpoints": true
     }
   ]
 }

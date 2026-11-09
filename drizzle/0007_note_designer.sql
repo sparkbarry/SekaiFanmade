@@ -1,0 +1,1 @@
+ALTER TABLE "charts" ADD COLUMN "note_designer" text DEFAULT '' NOT NULL;

@@ -33,6 +33,7 @@ export default async function EditChart({ params }: { params: Promise<{ id: stri
         <Section title="谱面信息">
           <ChartInfoForm
             chartId={id}
+            noteDesigner={chart.noteDesigner}
             description={chart.description}
             tags={chart.tags}
             allowDerivative={chart.allowDerivative}
@@ -43,7 +44,7 @@ export default async function EditChart({ params }: { params: Promise<{ id: stri
         <div className="flex flex-col gap-5">
           <Section title="上传新版本">
             <p className="text-[13px] leading-5 text-muted">
-              曲名、难度、作者等信息改为新 ZIP 里 manifest.json 的内容；简介、标签、得分、评论、游玩和下载次数保留。
+              曲名、难度、谱师署名等信息改为新 ZIP 里 manifest.json 的内容；简介、标签、得分、评论、游玩和下载次数保留。
             </p>
             <Uploader chartId={id} maxMb={env().UPLOAD_MAX_MB} />
           </Section>

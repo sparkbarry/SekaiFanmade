@@ -50,6 +50,8 @@ export interface ChartManifest {
   arranger: string;
   singer: string;
   collaborationLabel: string;
+  /** 谱师署名. */
+  noteDesigner: string;
   description: string;
   audioFileName: string;
   jacketFileName: string;
@@ -57,7 +59,6 @@ export interface ChartManifest {
   videoFileName: string;
   fillerSec: number;
   previewStartTimeSec: number;
-  userName: string;
   musicDifficultyType: Difficulty;
   playLevel: number;
   [key: string]: unknown;
@@ -115,6 +116,7 @@ export function normalizeManifest(raw: unknown): ChartManifest {
     arranger: str(m.arranger).trim(),
     singer: str(m.singer).trim(),
     collaborationLabel: str(m.collaborationLabel).trim(),
+    noteDesigner: str(m.noteDesigner).trim(),
     description: str(m.description),
     audioFileName: str(m.audioFileName, 'audio.ogg') || 'audio.ogg',
     jacketFileName: str(m.jacketFileName, 'jacket.png'),
@@ -122,7 +124,6 @@ export function normalizeManifest(raw: unknown): ChartManifest {
     videoFileName: str(m.videoFileName),
     fillerSec: Math.max(0, num(m.fillerSec)),
     previewStartTimeSec: Math.max(0, num(m.previewStartTimeSec)),
-    userName: str(m.userName),
     musicDifficultyType: difficulty as Difficulty,
     playLevel,
   };

@@ -6,12 +6,14 @@ import { Button, inputClass, Notice } from '@/components/ui';
 
 export function ChartInfoForm({
   chartId,
+  noteDesigner,
   description,
   tags,
   allowDerivative,
   parentChart,
 }: {
   chartId: string;
+  noteDesigner: string;
   description: string;
   tags: string[];
   allowDerivative: boolean;
@@ -22,6 +24,11 @@ export function ChartInfoForm({
   return (
     <form action={action} className="flex flex-col gap-3">
       <input type="hidden" name="chartId" value={chartId} />
+      <label className="flex flex-col gap-1.5 text-sm font-semibold">
+        谱师署名
+        <input name="noteDesigner" defaultValue={noteDesigner} maxLength={200} className={inputClass} />
+        <span className="text-xs font-normal text-muted">之后下载的谱面也用这个署名。上传新版本时会改为新 manifest.json 里的署名。</span>
+      </label>
       <label className="flex flex-col gap-1.5 text-sm font-semibold">
         简介
         <textarea name="description" defaultValue={description} maxLength={2000} rows={5} className={inputClass} />
