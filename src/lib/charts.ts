@@ -68,10 +68,6 @@ const chartColumns = {
   packageByteSize: packageFile.byteSize,
   audioStorageKey: audioFile.storageKey,
   jacketStorageKey: jacketFile.storageKey,
-  legacyPackageKey: charts.packageKey,
-  legacyPackageSize: charts.packageSize,
-  legacyAudioKey: charts.audioKey,
-  legacyJacketKey: charts.jacketKey,
   downloadCount: charts.downloadCount,
   playCount: charts.playCount,
   likeCount: charts.likeCount,
@@ -129,10 +125,10 @@ type ChartRow = Awaited<ReturnType<typeof selectCharts>>[number];
 
 function toSummary(r: ChartRow): ChartSummary {
   const s = storage();
-  // Charts not yet moved to content-addressed files still have their legacy keys.
-  const packageKey = r.packageStorageKey ?? r.legacyPackageKey ?? '';
-  const audioKey = r.audioStorageKey ?? r.legacyAudioKey ?? '';
-  const jacketKey = r.jacketStorageKey ?? r.legacyJacketKey;
+  // Live charts always have a package and audio (charts_files_check).
+  const packageKey = r.packageStorageKey ?? '';
+  const audioKey = r.audioStorageKey ?? '';
+  const jacketKey = r.jacketStorageKey;
   return {
     id: r.id,
     numberId: r.numberId,
@@ -149,7 +145,7 @@ function toSummary(r: ChartRow): ChartSummary {
     previewStartSec: r.previewStartSec,
     hasVideo: r.hasVideo,
     revision: r.revision,
-    packageSize: r.packageByteSize ?? r.legacyPackageSize ?? 0,
+    packageSize: r.packageByteSize ?? 0,
     jacketUrl: jacketKey ? s.publicUrl(jacketKey) : null,
     audioUrl: s.publicUrl(audioKey),
     packageUrl: s.publicUrl(packageKey),
@@ -412,18 +408,6 @@ async function ownedChart(viewer: Viewer, chartId: string) {
   return row;
 }
 
-/** Legacy per-revision objects of a chart that has not been moved yet; they belong to it alone. */
-async function deleteLegacyObjects(row: { packageKey: string | null; audioKey: string | null; jacketKey: string | null }) {
-  for (const key of [row.packageKey, row.audioKey, row.jacketKey]) {
-    if (!key) continue;
-    try {
-      await storage().delete(key);
-    } catch (err) {
-      console.error('legacy object delete failed', key, err instanceof Error ? err.message : err);
-    }
-  }
-}
-
 /** Replaces the package. Song and chart metadata come from the new manifest; the site description is kept. */
 export async function replaceChart(viewer: Viewer, chartId: string, zipPath: string): Promise<void> {
   const current = await ownedChart(viewer, chartId);
@@ -445,11 +429,6 @@ export async function replaceChart(viewer: Viewer, chartId: string, zipPath: str
           packageFileId: pkg.id,
           audioFileId: audio.id,
           jacketFileId: jacket?.id ?? null,
-          packageKey: null,
-          packageSize: null,
-          packageSha256: null,
-          audioKey: null,
-          jacketKey: null,
         })
         .where(and(eq(charts.id, current.id), eq(charts.revision, current.revision), isNull(charts.deletedAt)))
         .returning({ id: charts.id });
@@ -458,7 +437,6 @@ export async function replaceChart(viewer: Viewer, chartId: string, zipPath: str
   });
   // After the commit: the old files are released unless another chart (or the new revision) still uses them.
   await releaseFiles([current.packageFileId, current.audioFileId, current.jacketFileId]);
-  await deleteLegacyObjects(current);
 }
 
 export interface ChartInfoUpdate {
@@ -508,15 +486,11 @@ export async function deleteChart(viewer: Viewer, chartId: string): Promise<void
       packageFileId: null,
       audioFileId: null,
       jacketFileId: null,
-      packageKey: null,
-      audioKey: null,
-      jacketKey: null,
     })
     .where(and(eq(charts.id, row.id), isNull(charts.deletedAt)))
     .returning({ id: charts.id });
   if (!done) return;
   await releaseFiles([row.packageFileId, row.audioFileId, row.jacketFileId]);
-  await deleteLegacyObjects(row);
 }
 
 /* ---------- interactions ---------- */

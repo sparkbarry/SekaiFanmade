@@ -102,16 +102,10 @@ export const charts = pgTable(
     allowDerivative: boolean().notNull().default(false),
     /** 親譜面: the chart this one was derived from. */
     parentChartId: text().references((): AnyPgColumn => charts.id, { onDelete: 'set null' }),
-    /** Null only on deleted charts (their files are released) and, until moved, on charts with legacy keys. */
+    /** Null only on deleted charts, whose files are released (charts_files_check). */
     packageFileId: bigint({ mode: 'number' }).references(() => files.id),
     audioFileId: bigint({ mode: 'number' }).references(() => files.id),
     jacketFileId: bigint({ mode: 'number' }).references(() => files.id),
-    /** Legacy per-revision keys (charts/<id>/r<n>/...); moved to files by lib/legacy-files.ts, dropped later. */
-    packageKey: text(),
-    packageSize: bigint({ mode: 'number' }),
-    packageSha256: text(),
-    jacketKey: text(),
-    audioKey: text(),
     downloadCount: integer().notNull().default(0),
     /** Plays reported by the game (POST /api/v1/charts/<id>/plays), at most one per player per hour. */
     playCount: integer().notNull().default(0),
@@ -125,6 +119,10 @@ export const charts = pgTable(
     index('charts_list_idx').on(t.createdAt.desc()).where(sql`${t.deletedAt} is null`),
     index('charts_uploader_idx').on(t.uploaderId),
     check('charts_id_check', sql`${t.id} ~ '^[0-9a-f]{32}$'`),
+    check(
+      'charts_files_check',
+      sql`${t.deletedAt} is not null or (${t.packageFileId} is not null and ${t.audioFileId} is not null)`,
+    ),
     check('charts_difficulty_check', sql`${t.difficulty} in ('easy','normal','hard','expert','master','append')`),
     check('charts_level_check', sql`${t.playLevel} between 0 and 99`),
     check('charts_tags_check', sql`cardinality(${t.tags}) <= 8`),

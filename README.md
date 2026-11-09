@@ -16,7 +16,7 @@ OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上�
 - 对象按内容寻址，平铺在 `sekai-fanmade/` 下，名字是 `<sha256>.<扩展名>`，CDN 缓存一年：谱面包 `.zip`（重新打包的 ZIP 时间戳固定，同样的内容得到同样的哈希；Content-Disposition 是第一次存入时的文件名）、音频 `.ogg`／`.mp3`／`.wav`、512×512 JPEG 封面 `.jpg`（游戏只能解码 PNG／JPEG）。
 - `files` 表每个对象一行，`charts.package_file_id`／`audio_file_id`／`jacket_file_id` 引用它；内容相同的上传共用一行和一个对象。与 Fanmade 不同，谱面包 ZIP 也存进桶里，游戏从 CDN 下载，不在服务器上现场打包。
 - 替换或删除谱面后，`releaseFiles` 删掉不再被任何谱面引用的对象；存入和删除同一个键时用 `pg_advisory_xact_lock` 串行。事务失败时，本次上传的对象若没有 `files` 行就删掉（`discardUnreferenced`）。删不掉的记进 `retired_objects`，后台每 10 分钟重试（`src/lib/jobs.ts`）。
-- 迁移 0002 之前的谱面用的是 `charts/<number>/r<revision>/...`；服务器启动后 `src/lib/legacy-files.ts` 把它们搬成哈希对象并删掉旧对象。全部搬完后由下一个迁移删掉旧的 `package_key` 等列。
+- 迁移 0002 之前的谱面用的是 `charts/<number>/r<revision>/...`，由 `bb6954e` 的启动任务搬成哈希对象；迁移 0003 删掉了旧列，并加了 `charts_files_check`（没删除的谱面必须有谱面包和音频）。
 
 ## 代码结构
 
@@ -26,7 +26,7 @@ OpenSekai 的自制谱社区，线上地址 <https://sekai.ourtaiko.org>。上�
 | `src/lib/charts.ts` | 谱面、喜欢、评论、下载计数 |
 | `src/lib/session.ts`、`oidc.ts`、`crypto.ts` | SSO 登录与会话 |
 | `src/lib/storage.ts` | S3 与本地开发存储 |
-| `src/lib/file-store.ts`、`legacy-files.ts`、`jobs.ts`、`src/instrumentation.ts` | 内容寻址文件、旧对象搬迁、后台任务 |
+| `src/lib/file-store.ts`、`jobs.ts`、`src/instrumentation.ts` | 内容寻址文件、后台重试删除 |
 | `src/lib/db/schema.ts`、`drizzle/` | 表结构与迁移（容器启动时自动执行） |
 | `src/app/` | 页面、server actions、`/api/v1/*`、`/auth/*` |
 | `deploy/` | 生产 Compose、OpenResty 片段、发布脚本、环境变量示例 |
