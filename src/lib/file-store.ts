@@ -70,7 +70,6 @@ export async function releaseFiles(fileIds: (number | null | undefined)[]): Prom
         .from(charts)
         .where(
           or(
-            eq(charts.packageFileId, id),
             eq(charts.scoreFileId, id),
             eq(charts.audioFileId, id),
             eq(charts.jacketFileId, id),
@@ -102,7 +101,7 @@ export async function releaseOrphanFiles(): Promise<number> {
     where f.created_at < now() - interval '1 hour'
       and not exists (
         select 1 from ${charts} c
-        where f.id in (c.package_file_id, c.score_file_id, c.audio_file_id, c.jacket_file_id, c.jacket_source_file_id, c.video_file_id)
+        where f.id in (c.score_file_id, c.audio_file_id, c.jacket_file_id, c.jacket_source_file_id, c.video_file_id)
       )
     limit 100`);
   const ids = rows.map((r) => Number(r.id));

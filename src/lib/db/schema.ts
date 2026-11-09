@@ -119,8 +119,6 @@ export const charts = pgTable(
     videoFileId: bigint({ mode: 'number' }).references(() => files.id),
     /** Bytes of all parts plus manifest.json: the size of the assembled chart. */
     packageSize: bigint({ mode: 'number' }).notNull().default(0),
-    /** The ZIP of charts uploaded before the parts were stored separately; lib/package-split.ts empties it. */
-    packageFileId: bigint({ mode: 'number' }).references(() => files.id),
     downloadCount: integer().notNull().default(0),
     /** Plays reported by the game (POST /api/v1/charts/<id>/plays), at most one per player per hour. */
     playCount: integer().notNull().default(0),
@@ -138,7 +136,7 @@ export const charts = pgTable(
     check('charts_id_check', sql`${t.id} ~ '^[0-9a-f]{32}$'`),
     check(
       'charts_files_check',
-      sql`${t.deletedAt} is not null or (${t.audioFileId} is not null and (${t.packageFileId} is not null or (${t.scoreFileId} is not null and ${t.manifest} is not null)))`,
+      sql`${t.deletedAt} is not null or (${t.scoreFileId} is not null and ${t.audioFileId} is not null and ${t.manifest} is not null)`,
     ),
     check('charts_difficulty_check', sql`${t.difficulty} in ('easy','normal','hard','expert','master','append')`),
     check('charts_level_check', sql`${t.playLevel} between 0 and 99`),

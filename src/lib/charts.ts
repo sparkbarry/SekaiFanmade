@@ -423,20 +423,18 @@ export async function storeParts(tx: Tx, prepared: Awaited<ReturnType<typeof pre
     jacketFileId: jacket?.id ?? null,
     jacketSourceFileId: jacketSource?.id ?? null,
     videoFileId: video?.id ?? null,
-    packageFileId: null,
   };
 }
 
 /** Every file a chart row refers to, for releaseFiles. */
 export function chartFileIds(row: {
-  packageFileId: number | null;
   scoreFileId: number | null;
   audioFileId: number | null;
   jacketFileId: number | null;
   jacketSourceFileId: number | null;
   videoFileId: number | null;
 }) {
-  return [row.packageFileId, row.scoreFileId, row.audioFileId, row.jacketFileId, row.jacketSourceFileId, row.videoFileId];
+  return [row.scoreFileId, row.audioFileId, row.jacketFileId, row.jacketSourceFileId, row.videoFileId];
 }
 
 function metadataFrom(parsed: ParsedPackage) {
@@ -572,7 +570,6 @@ export async function deleteChart(viewer: Viewer, chartId: string): Promise<void
     .set({
       deletedAt: new Date(),
       manifest: null,
-      packageFileId: null,
       scoreFileId: null,
       audioFileId: null,
       jacketFileId: null,
